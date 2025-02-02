@@ -21,7 +21,6 @@ from torch import distributed as dist
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor
-
 from torchtitan.logging import logger
 
 
@@ -185,8 +184,7 @@ def create_context_parallel_ctx(
 ):
     try:
         from torch.distributed.tensor.experimental import context_parallel
-        from torch.distributed.tensor.experimental._attention import \
-            set_rotate_method
+        from torch.distributed.tensor.experimental._attention import set_rotate_method
     except ImportError:
         print(
             f"PyTorch version {torch.__version__} does not include the experimental "
@@ -270,15 +268,25 @@ def init_distributed(job_config):
 def get_num_params(model: torch.nn.Module, exclude_embedding: bool = False) -> int:
     num_params = sum(p.numel() for p in model.parameters())
     if exclude_embedding:
-        num_params -= sum(i.num_parameters() for i in model.children() if isinstance(i, nn.Embedding))
+        num_params -= sum(
+            i.num_parameters() for i in model.children() if isinstance(i, nn.Embedding)
+        )
     return num_params
 
 
 def get_num_flop_per_token(num_params: int, model_config, seq_len) -> int:
+    if hasattr(model_config, "num_heads"):
+        num_heads = model_config.num_heads
+    elif hasattr(model_config, "num_attention_heads"):
+        num_heads = model_config.num_attention_heads
+    else:
+        num_heads = 1
+        logger.warning("num_heads not found in model_config, defaulting to 1. ")
+
     l, h, q, t = (
         model_config.num_hidden_layers,
-        model_config.num_heads,
-        model_config.hidden_size // model_config.num_heads,
+        num_heads,
+        model_config.hidden_size // num_heads,
         seq_len,
     )
     # Reasoning behind the factor of 12 for the self-attention part of the formula:
@@ -397,9 +405,10 @@ def get_total_norm(
 
     norms: List[torch.Tensor] = []
     for (device, _), ([device_tensors], _) in grouped_tensors.items():
-        if (foreach is None and nn.utils.clip_grad._has_foreach_support(device_tensors, device)) or (
-            foreach and nn.utils.clip_grad._device_has_foreach_support(device)
-        ):
+        if (
+            foreach is None
+            and nn.utils.clip_grad._has_foreach_support(device_tensors, device)
+        ) or (foreach and nn.utils.clip_grad._device_has_foreach_support(device)):
             norms.extend(torch._foreach_norm(device_tensors, norm_type))
         elif foreach:
             raise RuntimeError(
@@ -474,9 +483,10 @@ def clip_grads_with_norm_(
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for (device, _), ([device_grads], _) in grouped_grads.items():
-        if (foreach is None and nn.utils.clip_grad._has_foreach_support(device_grads, device)) or (
-            foreach and nn.utils.clip_grad._device_has_foreach_support(device)
-        ):
+        if (
+            foreach is None
+            and nn.utils.clip_grad._has_foreach_support(device_grads, device)
+        ) or (foreach and nn.utils.clip_grad._device_has_foreach_support(device)):
             torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))
         elif foreach:
             raise RuntimeError(
@@ -524,9 +534,7 @@ def clip_grad_norm_(
 
     """
     grads = [p.grad for p in parameters if p.grad is not None]
-    total_norm = get_total_norm(
-        grads, norm_type, error_if_nonfinite, foreach
-    )
+    total_norm = get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
 
     # If total_norm is a DTensor, the placements must be `torch.distributed._tensor.ops.math_ops._NormPartial`.
     # We can simply reduce the DTensor to get the total norm in this tensor's process group

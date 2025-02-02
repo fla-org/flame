@@ -60,3 +60,6 @@ pipeline_parallel_degree = 1
 
 [float8]
 enable_float8_linear = false
+
+[activation_checkpoint]
+mode = "none"

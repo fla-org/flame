@@ -185,7 +185,10 @@ class JobConfig:
             "--training.seq_len", type=int, default=2048, help="Sequence length"
         )
         self.parser.add_argument(
-            "--training.context_len", type=int, default=2048, help="Max length allowed for each sequence"
+            "--training.context_len",
+            type=int,
+            default=2048,
+            help="Max length allowed for each sequence",
         )
         self.parser.add_argument(
             "--training.varlen",
@@ -224,32 +227,32 @@ class JobConfig:
         self.parser.add_argument(
             "--training.dataset",
             default="HuggingFaceFW/fineweb-edu",
-            help="Dataset to use, with comma separated values"
+            help="Dataset to use, with comma separated values",
         )
         self.parser.add_argument(
             "--training.dataset_name",
             default=None,
-            help="The name of the dataset config, with comma separated values if provided"
+            help="The name of the dataset config, with comma separated values if provided",
         )
         self.parser.add_argument(
             "--training.dataset_split",
             default=None,
-            help="Dataset split to use, with comma separated values if provided"
+            help="Dataset split to use, with comma separated values if provided",
         )
         self.parser.add_argument(
             "--training.data_dir",
             default=None,
-            help="Data dirs to use, with comma separated values if provided"
+            help="Data dirs to use, with comma separated values if provided",
         )
         self.parser.add_argument(
             "--training.data_files",
             default=None,
-            help="Data files to use, with comma separated values if provided"
+            help="Data files to use, with comma separated values if provided",
         )
         self.parser.add_argument(
             "--training.data_probs",
             default=None,
-            help="Data sampling probabilities, with comma separated values if provided"
+            help="Data sampling probabilities, with comma separated values if provided",
         )
         self.parser.add_argument(
             "--training.streaming",
@@ -260,14 +263,14 @@ class JobConfig:
             "--training.num_workers",
             type=int,
             default=32,
-            help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
+            help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
         )
         self.parser.add_argument(
             "--training.prefetch_factor",
             type=int,
             default=2,
             help="Number of batches loaded in advance by each worker."
-                 "2 means there will be a total of 2 * num_workers batches prefetched across all workers."
+            "2 means there will be a total of 2 * num_workers batches prefetched across all workers.",
         )
         self.parser.add_argument(
             "--training.data_parallel_replicate_degree",
@@ -580,6 +583,23 @@ class JobConfig:
             type=int,
             default=-1,
             help="Load the checkpoint at the specified step. If -1, load the latest checkpoint.",
+        )
+
+        # activation checkpointing configs
+        self.parser.add_argument(
+            "--activation_checkpoint.mode",
+            type=str,
+            default="selective",
+            help="Type of activation checkpointing to use ['none', 'full', 'selective']",
+        )
+        self.parser.add_argument(
+            "--activation_checkpoint.selective_ac_option",
+            type=str,
+            default="2",  # 2 = checkpoint every other layer
+            help="""
+                Selective activation checkpointing options ['int', 'op'].
+                'int' (e.g., 2) for every nth layer, or 'op' for op level ac.
+            """,
         )
 
         # float8 configs
