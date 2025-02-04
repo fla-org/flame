@@ -117,12 +117,12 @@ def apply_tp(
         model,
         tp_mesh,
         {
-            "model.model.embeddings": RowwiseParallel(
+            "model.embeddings": RowwiseParallel(
                 input_layouts=Replicate(),
                 output_layouts=Shard(1),
             ),
-            "model.model.norm": SequenceParallel(),
-            "model.lm_head": ColwiseParallel(
+            "model.norm": SequenceParallel(),
+            "lm_head": ColwiseParallel(
                 input_layouts=Shard(1),
                 output_layouts=Shard(-1) if loss_parallel else Replicate(),
                 use_local_output=not loss_parallel,
@@ -160,8 +160,8 @@ def apply_tp(
         layer_plan = {
             "attn_norm": SequenceParallel(),
             "attn": prepare_module_input(
-                input_layouts=(Shard(1), None),
-                desired_input_layouts=(Replicate(), None),
+                input_kwarg_layouts={"hidden_states": Shard(1)},
+                desired_input_kwarg_layouts={"hidden_states": Replicate()},
             ),
             "attn.q_proj": colwise_parallel(),
             "attn.k_proj": colwise_parallel(),
