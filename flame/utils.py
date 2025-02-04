@@ -21,6 +21,7 @@ from torch import distributed as dist
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor
+
 from torchtitan.logging import logger
 
 
@@ -184,7 +185,8 @@ def create_context_parallel_ctx(
 ):
     try:
         from torch.distributed.tensor.experimental import context_parallel
-        from torch.distributed.tensor.experimental._attention import set_rotate_method
+        from torch.distributed.tensor.experimental._attention import \
+            set_rotate_method
     except ImportError:
         print(
             f"PyTorch version {torch.__version__} does not include the experimental "

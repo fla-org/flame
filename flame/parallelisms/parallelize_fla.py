@@ -8,22 +8,18 @@
 # training techniques (e.g. activation checkpointing and compile) to the Llama model.
 
 from collections import defaultdict
-from functools import partial
 
 import torch
 import torch.nn as nn
 from torch.distributed import DeviceMesh
-from torch.distributed._composable.fsdp import (
-    CPUOffloadPolicy,
-    MixedPrecisionPolicy,
-    fully_shard,
-)
+from torch.distributed._composable.fsdp import (CPUOffloadPolicy,
+                                                MixedPrecisionPolicy,
+                                                fully_shard)
 from torch.distributed._composable.replicate import replicate
-from torch.distributed._tensor import Replicate, Shard
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper as ptd_checkpoint_wrapper,
-)
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import \
+    checkpoint_wrapper as ptd_checkpoint_wrapper
 from torch.distributed.tensor.parallel import parallelize_module
+
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.logging import logger
 from torchtitan.parallelisms.parallel_dims import ParallelDims
@@ -140,7 +136,8 @@ def apply_tp(
             )
 
     if enable_async_tp:
-        from torch.distributed._symmetric_memory import enable_symm_mem_for_group
+        from torch.distributed._symmetric_memory import \
+            enable_symm_mem_for_group
 
         torch._inductor.config._micro_pipeline_tp = True
         enable_symm_mem_for_group(tp_mesh.get_group().group_name)
@@ -184,9 +181,7 @@ def _apply_ac_to_transformer_block(module: nn.Module, ac_config):
         )
     if use_op_sac:
         from torch.utils.checkpoint import (
-            CheckpointPolicy,
-            create_selective_checkpoint_contexts,
-        )
+            CheckpointPolicy, create_selective_checkpoint_contexts)
 
         def _get_custom_policy(meta):
             def _custom_policy(ctx, func, *args, **kwargs):

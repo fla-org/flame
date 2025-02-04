@@ -9,10 +9,13 @@ import os
 import time
 from datetime import timedelta
 
-import fla  # noqa
 import torch
 import torch.distributed.tensor
 from datasets import interleave_datasets, load_dataset
+from torch.distributed.elastic.multiprocessing.errors import record
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
+import fla  # noqa
 from flame import utils
 from flame.checkpoint import CheckpointManager, TrainState
 from flame.config_manager import JobConfig
@@ -22,12 +25,11 @@ from flame.optimizer import build_lr_schedulers, build_optimizers
 from flame.parallelisms.parallelize_fla import parallelize_fla
 from flame.parallelisms.pipeline_fla import pipeline_fla
 from flame.utils import device_module, device_type
-from torch.distributed.elastic.multiprocessing.errors import record
 from torchtitan.float8 import Float8Handler
 from torchtitan.logging import init_logger, logger
 from torchtitan.parallelisms import ParallelDims
-from torchtitan.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+from torchtitan.profiling import (maybe_enable_memory_snapshot,
+                                  maybe_enable_profiling)
 
 
 # Enable debug tracing on failure: httgs://pytorch.org/docs/stable/elastic/errors.html

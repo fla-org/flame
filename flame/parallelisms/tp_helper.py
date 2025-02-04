@@ -1,21 +1,16 @@
-import os
+# -*- coding: utf-8 -*-
 
 from torch.distributed._tensor import Replicate, Shard
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    PrepareModuleInput,
-    PrepareModuleOutput,
-    RowwiseParallel,
-    SequenceParallel,
-)
+from torch.distributed.tensor.parallel import (ColwiseParallel,
+                                               PrepareModuleInput,
+                                               PrepareModuleOutput,
+                                               RowwiseParallel,
+                                               SequenceParallel)
 
 try:
     from torchao.float8.float8_tensor_parallel import (
-        Float8ColwiseParallel,
-        Float8RowwiseParallel,
-        PrepareFloat8ModuleInput,
-    )
-except:
+        Float8ColwiseParallel, Float8RowwiseParallel, PrepareFloat8ModuleInput)
+except ImportError:
     Float8ColwiseParallel = None
     Float8RowwiseParallel = None
     PrepareFloat8ModuleInput = None

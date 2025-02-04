@@ -13,13 +13,14 @@ import torch
 import torch.nn as nn
 from torch.distributed import DeviceMesh
 from torch.distributed.pipelining import PipelineStage
+from transformers import PretrainedConfig
+
 from torchtitan.config_manager import JobConfig
 from torchtitan.logging import logger
 from torchtitan.parallelisms.parallel_dims import ParallelDims
 from torchtitan.parallelisms.pipelining_utils import (build_pipeline_schedule,
                                                       generate_split_points,
                                                       stage_ids_this_rank)
-from transformers import PretrainedConfig
 
 DeviceType = Union[int, str, torch.device]
 
