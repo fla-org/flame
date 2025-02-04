@@ -8,6 +8,7 @@
 # training techniques (e.g. activation checkpointing and compile) to the Llama model.
 
 from collections import defaultdict
+from functools import partial
 
 import torch
 import torch.nn as nn
@@ -22,13 +23,7 @@ from torch.distributed._tensor import Replicate, Shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper as ptd_checkpoint_wrapper,
 )
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    PrepareModuleInput,
-    RowwiseParallel,
-    SequenceParallel,
-    parallelize_module,
-)
+from torch.distributed.tensor.parallel import parallelize_module
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.logging import logger
 from torchtitan.parallelisms.parallel_dims import ParallelDims
@@ -125,78 +120,21 @@ def apply_tp(
     # transformer block's inputs)
     # 2. Parallelize the root norm layer over the sequence dim
     # 3. Parallelize the final linear output layer
-    parallelize_module(
-        model,
-        tp_mesh,
-        {
-            "model.model.embeddings": RowwiseParallel(
-                input_layouts=Replicate(),
-                output_layouts=Shard(1),
-            ),
-            "model.model.norm": SequenceParallel(),
-            "model.lm_head": ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Shard(-1) if loss_parallel else Replicate(),
-                use_local_output=not loss_parallel,
-            ),
-        },
-    )
+    from flame.parallelisms.tp_helper import dispatch_tp_plan
 
-    # Parallel styles used for transformer block linear weights and their
-    # inputs may be different for float8 linears
-    if enable_float8:
-        # TODO(vkuzo): once float8 configuration supports delayed scaling,
-        # add a check here to enforce supported float8 all-gather configurations
-        # TODO(vkuzo): add the items below to __init__.py of torchao.float8 and import from there
-        from torchao.float8.float8_tensor_parallel import (
-            Float8ColwiseParallel,
-            Float8RowwiseParallel,
-            PrepareFloat8ModuleInput,
-        )
+    tp_plan = dispatch_tp_plan(model, loss_parallel, enable_float8)
 
-        rowwise_parallel, colwise_parallel, prepare_module_input = (
-            Float8RowwiseParallel,
-            Float8ColwiseParallel,
-            PrepareFloat8ModuleInput,
-        )
-    else:
-        rowwise_parallel, colwise_parallel, prepare_module_input = (
-            RowwiseParallel,
-            ColwiseParallel,
-            PrepareModuleInput,
-        )
-
-    # Apply tensor + sequence parallelism to every transformer block
-    # NOTE: At the cost of model code change, we can accelerate Sequence Parallel
-    #       by folding (and unfolding) the batch dimension and the sequence dimension.
-    #       Examples can be found at https://github.com/pytorch/torchtitan/pull/437
+    parallelize_module(model, tp_mesh, tp_plan.others_plan)
 
     actual_transformer_blocks = monkey_patch_get_real_transformer_block(model)
     if actual_transformer_blocks is None:
         logger.warning("No TransformerBlock found for tensor parallelism")
     else:
-        for _, block in enumerate(actual_transformer_blocks):
-            layer_plan = {
-                "attn_norm": SequenceParallel(),
-                "attn": prepare_module_input(
-                    input_layouts=(Shard(1), None),
-                    desired_input_layouts=(Replicate(), None),
-                ),
-                "attn.q_proj": colwise_parallel(),
-                "attn.k_proj": colwise_parallel(),
-                "attn.v_proj": colwise_parallel(),
-                "attn.o_proj": rowwise_parallel(output_layouts=Shard(1)),
-                "mlp_norm": SequenceParallel(),
-                "mlp": prepare_module_input(
-                    input_layouts=(Shard(1),),
-                    desired_input_layouts=(Replicate(),),
-                ),
-                "mlp.gate_proj": colwise_parallel(),
-                "mlp.down_proj": rowwise_parallel(output_layouts=Shard(1)),
-            }
+        for layer_id, transformer_block in enumerate(actual_transformer_blocks):
+            layer_plan = dispatch_tp_plan(transformer_block).layer_plan
 
             parallelize_module(
-                module=block,
+                module=transformer_block,
                 device_mesh=tp_mesh,
                 parallelize_plan=layer_plan,
             )

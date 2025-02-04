@@ -4,7 +4,7 @@ import dask.dataframe as dd
 from datasets import load_dataset
 
 """
-YOU NEED `datasets` PACKAGE TO RUN THIS SCRIPT
+YOU NEED `dask` PACKAGE TO RUN THIS SCRIPT
 """
 
 source = "data/fineweb/sample/10BT"

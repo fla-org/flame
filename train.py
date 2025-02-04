@@ -11,6 +11,7 @@ from datetime import timedelta
 
 import fla  # noqa
 import torch
+import torch.distributed.tensor
 from datasets import interleave_datasets, load_dataset
 from flame import utils
 from flame.checkpoint import CheckpointManager, TrainState
@@ -477,6 +478,23 @@ def main(job_config: JobConfig):
                 data_loading_times.append(time.perf_counter() - data_load_start)
 
                 input_ids = input_ids.to(device_type)
+
+                """
+                TODO[flame]: We need to carefully handle the position_ids for TP/CP
+                Depending on the Models'PE, the position_ids might be different.
+
+                e.g. for TP
+                    For RoPE, all ranks have the same position_ids. [FOR HF model]
+                    For sinusoidal, each rank has the coresponding chunked  position_ids. [FOR HF model]
+
+                e.g. for CP, [optional_context_parallel_ctx shoudl automatically distbute the position_ids]
+                    Each rank has the coresponding chunked position_ids. [FOR All model]
+
+                """
+                position_ids = torch.arange(
+                    0, input_ids.shape[1], device=device_type
+                ).repeat(input_ids.shape[0], 1)
+
                 labels = labels.to(device_type)
                 cu_seqlens = (
                     batch["cu_seqlens"].to(device_type)
@@ -495,6 +513,7 @@ def main(job_config: JobConfig):
                     if parallel_dims.cp_enabled
                     else None
                 )
+                # #! TODO[flame], we should distribute the position_ids as well with CP
 
                 if parallel_dims.pp_enabled:
                     # Pipeline Parallel forward / backward inside step() call
@@ -520,7 +539,10 @@ def main(job_config: JobConfig):
                     # Non-PP forward / backward
                     with train_context(optional_context_parallel_ctx):
                         output = model(
-                            input_ids=input_ids, labels=labels, cu_seqlens=cu_seqlens
+                            input_ids=input_ids,
+                            labels=labels,
+                            position_ids=position_ids,
+                            cu_seqlens=cu_seqlens,
                         )
                         loss = output.loss
                         loss.backward()
@@ -576,17 +598,27 @@ def main(job_config: JobConfig):
 
                 time_delta = time.perf_counter() - time_last_log
 
+                """
+                TODO[flame]: check this after fixing TP/PP/CP, if we assume all ranks have the same number of tokens
+                we can just multiple it by DP's dims, this avoiding to deal with the case taht dp does nto exists
+                """
+                # update train state
+                # train_state.token += (
+                #     utils.dist_reduce(
+                #         torch.tensor(ntokens_since_last_log, device=device),
+                #         "sum",
+                #         world_mesh["dp_cp"],
+                #     )
+                #     / parallel_dims.non_data_parallel_size
+                # )
+
                 # update train state
                 train_state.token += (
-                    utils.dist_reduce(
-                        torch.tensor(ntokens_since_last_log, device=device),
-                        "sum",
-                        world_mesh["dp_cp"],
-                    )
+                    ntokens_since_last_log
+                    * parallel_dims.world_size
                     / parallel_dims.non_data_parallel_size
                 )
 
-                # TODO[flame]: check this after fixing TP/PP/CP
                 train_state.elapsed += timedelta(seconds=time_delta)
                 train_state.log_steps.append(train_state.step)
                 train_state.global_avg_losses.append(global_avg_loss)
@@ -678,4 +710,5 @@ if __name__ == "__main__":
     config = JobConfig()
     config.parse_args()
     main(config)
+    torch.distributed.destroy_process_group()
     torch.distributed.destroy_process_group()

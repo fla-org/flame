@@ -763,4 +763,3 @@ class JobConfig:
         cmd_args, _ = aux_parser.parse_known_args(args_list)
 
         return args, cmd_args
-        return args, cmd_args
