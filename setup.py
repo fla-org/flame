@@ -40,7 +40,7 @@ setup(
         'torchdata',
         'transformers>=4.45.0',
         'triton>=3.0',
-        'datasets>=3.1.0',
+        'datasets>=3.3.0',
         'einops',
         'ninja',
         'wandb',

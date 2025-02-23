@@ -51,6 +51,9 @@ NNODE=1 NGPU=8 LOG_RANK=0 bash train.sh \
   --training.num_workers 32 \
   --training.prefetch_factor 2 \
   --training.seed 42 \
+  --training.compile \
+  --training.tensor_parallel_degree 1 \
+  --training.disable_loss_parallel \
   --checkpoint.interval 2048 \
   --checkpoint.load_step -1 \
   --metrics.log_freq 1

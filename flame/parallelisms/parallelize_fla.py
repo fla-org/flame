@@ -22,7 +22,7 @@ from torch.distributed.tensor.parallel import parallelize_module
 
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.logging import logger
-from torchtitan.parallelisms.parallel_dims import ParallelDims
+from torchtitan.parallelisms import ParallelDims
 
 
 def parallelize_fla(
@@ -45,25 +45,20 @@ def parallelize_fla(
             and not job_config.training.compile
         ):
             raise RuntimeError("Async TP requires --training.compile")
+        enable_float8_linear = "float8" in job_config.model.converters
         apply_tp(
             model,
             world_mesh["tp"],
             loss_parallel=parallel_dims.loss_parallel_enabled,
-            enable_float8=job_config.float8.enable_float8_linear,
+            enable_float8=enable_float8_linear,
             enable_async_tp=job_config.experimental.enable_async_tensor_parallel,
         )
 
     if job_config.activation_checkpoint.mode != "none":
-        # #! TODO[flame]: for some reasons, FLA's model might not work with activation checkpointing
         apply_ac(model, job_config.activation_checkpoint)
 
     # turn on per-TransformerBlock compile after AC wrapping and before FSDP
     if job_config.training.compile:
-        if job_config.model.norm_type == "fused_rmsnorm":
-            raise NotImplementedError(
-                "fused_rmsnorm is not compatible with torch.compile yet. "
-                "Please use rmsnorm or layernorm."
-            )
         apply_compile(model)
 
     if (
@@ -81,6 +76,7 @@ def parallelize_fla(
             reduce_dtype=TORCH_DTYPE_MAP[job_config.training.mixed_precision_reduce],
             pp_enabled=parallel_dims.pp_enabled,
             cpu_offload=job_config.training.enable_cpu_offload,
+            reshard_after_forward_policy=job_config.training.fsdp_reshard_after_forward,
         )
 
         if parallel_dims.dp_replicate_enabled:
@@ -118,19 +114,18 @@ def apply_tp(
     # 3. Parallelize the final linear output layer
     from flame.parallelisms.tp_helper import dispatch_tp_plan
 
-    tp_plan = dispatch_tp_plan(model, loss_parallel, enable_float8)
-
+    tp_plan = dispatch_tp_plan(model, loss_parallel=loss_parallel, enable_float8=enable_float8)
     parallelize_module(model, tp_mesh, tp_plan.others_plan)
 
     blocks = get_blocks(model)
     if blocks is None:
         logger.warning("No TransformerBlock found for tensor parallelism")
     else:
-        for layer_id, transformer_block in enumerate(blocks):
-            layer_plan = dispatch_tp_plan(transformer_block).layer_plan
+        for _, block in enumerate(blocks):
+            layer_plan = dispatch_tp_plan(block).layer_plan
 
             parallelize_module(
-                module=transformer_block,
+                module=block,
                 device_mesh=tp_mesh,
                 parallelize_plan=layer_plan,
             )
@@ -155,13 +150,13 @@ _save_list = {
     torch.ops.aten._scaled_dot_product_flash_attention.default,
     torch.ops._c10d_functional.reduce_scatter_tensor.default,
     # for low precision training, it's useful to always save
-    # the result of max(abs(tensor))
-    torch.ops.aten.abs.default,
+    # the result of max, since the absolute maximum is
+    # used to compute the scaling factor for quantization.
     torch.ops.aten.max.default,
 }
 
 
-def _apply_ac_to_transformer_block(module: nn.Module, ac_config):
+def _apply_ac_to_block(module: nn.Module, ac_config):
     valid_ac_modes = ("full", "selective")
     if ac_config.mode not in valid_ac_modes:
         raise ValueError(
@@ -223,33 +218,43 @@ def _apply_ac_to_transformer_block(module: nn.Module, ac_config):
 
 def apply_ac(model: nn.Module, ac_config):
     """Apply activation checkpointing to the model."""
-
     blocks = get_blocks(model)
     if blocks is None:
         logger.warning("No TransformerBlock found for activation checkpointing")
         return
 
-    for layer_id, transformer_block in blocks.named_children():
-        transformer_block = _apply_ac_to_transformer_block(transformer_block, ac_config)
-        blocks.register_module(layer_id, transformer_block)
+    for layer_id, block in blocks.named_children():
+        block = _apply_ac_to_block(block, ac_config)
+        blocks.register_module(layer_id, block)
 
     logger.info(f"Applied {ac_config.mode} activation checkpointing to the model")
 
 
 def apply_compile(model: nn.Module):
     """
-    Apply torch.compile to each TransformerBlock, which makes compilation efficient due to
+    Apply torch.compile to each block, which makes compilation efficient due to
     repeated structure. Alternatively one can compile the whole model (after applying DP).
     """
 
     blocks = get_blocks(model)
     if blocks is None:
-        logger.warning("No TransformerBlock found for torch.compile")
+        logger.warning("No block found for torch.compile")
     else:
         for layer_id, block in blocks.named_children():
             block = torch.compile(block)
             blocks.register_module(layer_id, block)
-        logger.info("Compiling each TransformerBlock with torch.compile")
+        logger.info("Compiling each block with torch.compile")
+
+    base_model_prefix = getattr(model, "base_model_prefix", "model")
+    logger.info("Compiling the embedding, norm, and lm_head layers with torch.compile")
+    embeddings = torch.compile(getattr(model, base_model_prefix).embeddings, fullgraph=True)
+    getattr(model, base_model_prefix).register_module("embeddings", embeddings)
+    norm = torch.compile(getattr(model, base_model_prefix).norm, fullgraph=True)
+    getattr(model, base_model_prefix).register_module("norm", norm)
+    model.register_module("lm_head", torch.compile(model.lm_head, fullgraph=True))
+
+    logger.info("Compiling the entire model with torch.compile")
+    model = torch.compile(model)
 
 
 def apply_fsdp(
@@ -259,9 +264,25 @@ def apply_fsdp(
     reduce_dtype: torch.dtype,
     pp_enabled: bool,
     cpu_offload: bool = False,
+    reshard_after_forward_policy: str = "default",
 ):
     """
-    Apply data parallelism to the model. FSDP2 is used here.
+    Apply data parallelism (via FSDP2) to the model.
+
+    Args:
+        model (nn.Module): The model to apply data parallelism to.
+        dp_mesh (DeviceMesh): The device mesh to use for data parallelism.
+        param_dtype (torch.dtype): The data type to use for model parameters.
+        reduce_dtype (torch.dtype): The data type to use for reduction operations.
+        pp_enabled (bool): Whether pipeline parallelism is enabled.
+        cpu_offload (bool, optional): Whether to offload model parameters to CPU. Defaults to False.
+        reshard_after_forward_policy (str, optional):
+            The policy to use for resharding after forward pass. Defaults to "default".
+            Other options: "never", "always".
+            - "default" applies default resharding behavior, implementing "smart defaults" for known optimal scenarios.
+            - "always" will enable `reshard_after_forward` for all forward passes.
+            - "never" will disable `reshard_after_forward` for all forward passes.
+
     """
     mp_policy = MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=reduce_dtype)
     fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
@@ -271,18 +292,26 @@ def apply_fsdp(
     blocks = get_blocks(model)
     if blocks is None:
         logger.warning("No TransformerBlock found for FSDP")
-
     else:
         total_blocks = len(blocks)
         for layer_id, block in enumerate(blocks):
-            if pp_enabled:
-                # For PP, do not reshard after forward to avoid per-microbatch
-                # all-gathers, which can be expensive and non-overlapped
+            if reshard_after_forward_policy == "always":
+                reshard_after_forward = True
+            elif reshard_after_forward_policy == "never":
                 reshard_after_forward = False
+            elif reshard_after_forward_policy == "default":
+                if pp_enabled:
+                    # For PP, do not reshard after forward to avoid per-microbatch
+                    # all-gathers, which can be expensive and non-overlapped
+                    reshard_after_forward = False
+                else:
+                    # As an optimization, do not reshard after forward for the last
+                    # transformer block since FSDP would prefetch it immediately
+                    reshard_after_forward = int(layer_id) < total_blocks - 1
             else:
-                # As an optimization, do not reshard after forward for the last
-                # transformer block since FSDP would prefetch it immediately
-                reshard_after_forward = int(layer_id) < total_blocks - 1
+                raise ValueError(
+                    f"Invalid reshard_after_forward_policy: {reshard_after_forward_policy}."
+                )
             fully_shard(
                 block,
                 **fsdp_config,

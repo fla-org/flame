@@ -15,6 +15,7 @@ from torch.distributed.elastic.multiprocessing.errors import record
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import fla  # noqa
+from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
 from flame import utils
 from flame.checkpoint import CheckpointManager, TrainState
 from flame.config_manager import JobConfig
@@ -26,6 +27,7 @@ from flame.parallelisms.pipeline_fla import pipeline_fla
 from flame.utils import device_module, device_type
 from torchtitan.float8 import Float8Converter
 from torchtitan.logging import init_logger, logger
+from torchtitan.model_converter import build_model_converters
 from torchtitan.parallelisms import ParallelDims
 from torchtitan.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
 
@@ -129,7 +131,7 @@ def main(job_config: JobConfig):
                     f"Dataset {job_config.training.dataset} has insufficient shards ({dataset.num_shards}). "
                     f"Need {min_num_shards} shards minimum for {dp_degree} data parallel workers × "
                     f"{job_config.training.num_workers} dataloader workers. "
-                    f"Resharding dataset to {min_num_shards} shards and disabling streaming mode."
+                    f"Disabling the streaming mode and resharding dataset to {min_num_shards} shards."
                     f"{color.reset}"
                 )
                 dataset = (
@@ -302,21 +304,34 @@ def main(job_config: JobConfig):
     # 2. disable fused norm if TP is enabled
     # 3. vocab size from tokenizer
     # 4. context_len base on inputs
-    if parallel_dims.tp_enabled and model_config.fuse_norm:
-        logger.warning(
-            f"{color.red}"
-            f"Fused norm is not compatible with tensor parallelism. "
-            f"Disabling it for now."
-            f"{color.reset}"
-        )
-        model_config.fuse_norm = False
-    model_config.vocab_size = tokenizer.vocab_size
+    if parallel_dims.tp_enabled:
+        if model_config.fuse_norm:
+            logger.warning(
+                f"{color.red}"
+                f"Fused norm is not compatible with tensor parallelism. "
+                f"Disabling it for now."
+                f"{color.reset}"
+            )
+            model_config.fuse_norm = False
+    if parallel_dims.loss_parallel_enabled:
+        if model_config.fuse_cross_entropy:
+            logger.warning(
+                f"{color.red}"
+                f"Loss parallel enabled. Disabling fused cross entropy for now."
+                f"{color.reset}"
+            )
+            model_config.fuse_cross_entropy = False
+    model_config.vocab_size = max(tokenizer.vocab_size, model_config.vocab_size)
 
     logger.info(
         f"Building model from the config\n{color.green}{model_config}{color.reset}"
     )
     with torch.device("meta"):
         model = AutoModelForCausalLM.from_config(model_config)
+        if model_config.fuse_cross_entropy:
+            model.criterion = FusedLinearCrossEntropyLoss(
+                num_chunks=8 // parallel_dims.tp
+            )
         # defer weight initialization until after parallelisms are applied
         model.apply(lambda m: setattr(m, "_is_hf_initialized", False))
     logger.info(f"{color.blue}\n{model}{color.reset}\n")
@@ -341,7 +356,7 @@ def main(job_config: JobConfig):
     num_flop_per_token = utils.get_num_flop_per_token(
         utils.get_num_params(model, exclude_embedding=True),
         model_config,
-        job_config.training.seq_len,
+        job_config.training.context_len,
     )
 
     # move sharded model to CPU/GPU and initialize weights via DTensor
@@ -374,6 +389,7 @@ def main(job_config: JobConfig):
     else:
         # apply PT-D Tensor Parallel, activation checkpointing, torch.compile, Data Parallel
         parallelize_fla(model, world_mesh, parallel_dims, job_config)
+
         model.to_empty(device=init_device)
         with torch.no_grad():
             model.post_init()
@@ -498,6 +514,7 @@ def main(job_config: JobConfig):
                 data_load_start = time.perf_counter()
                 batch = next(data_iterator)
                 input_ids, labels = batch["input_ids"], batch["labels"]
+
                 ntokens_since_last_log += labels.numel()
                 data_loading_times.append(time.perf_counter() - data_load_start)
 
@@ -596,7 +613,8 @@ def main(job_config: JobConfig):
                 optimizers.step()
             lr_schedulers.step()
 
-            # calculate float8 dynamic amax/scale for all-parameter for FSDP2
+            # Post-optimizer model converters hook.
+            # e.g. calculate float8 dynamic amax/scale for all-parameter for FSDP2
             # it issues a single all-reduce for all parameters at once for better performance
             # !TODO[flame]: torchtitan@57387af0e0e6173e7c0f3a38ac5db1134bb376d5 introduces a bug that cannot handel the case:
             if fp8_enabled:

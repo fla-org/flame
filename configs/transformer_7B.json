@@ -1,0 +1,21 @@
+{
+    "attention_bias": false,
+    "bos_token_id": 1,
+    "eos_token_id": 2,
+    "fuse_cross_entropy": true,
+    "fuse_norm": true,
+    "hidden_act": "swish",
+    "hidden_ratio": 4,
+    "hidden_size": 4096,
+    "initializer_range": 0.02,
+    "intermediate_size": 14336,
+    "model_type": "transformer",
+    "norm_eps": 1e-06,
+    "num_heads": 32,
+    "num_hidden_layers": 32,
+    "num_kv_heads": 8,
+    "rope_theta": 10000.0,
+    "tie_word_embeddings": false,
+    "use_cache": true,
+    "window_size": null
+}

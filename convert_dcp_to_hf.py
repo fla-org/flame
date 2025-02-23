@@ -1,48 +1,60 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 
 import argparse
+import io
 import os
 import tempfile
+from datetime import timedelta
 
 import torch
+import torch.serialization
 from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import fla  # noqa
+from torchtitan.logging import init_logger, logger
 
 
+@torch.inference_mode()
 def save_pretrained(
     checkpoint: str,
     path: str,
     config: str,
     tokenizer: str
 ):
-    print(f"Loading the config from {config}")
+    logger.info(f"Loading the config from {config}")
     config = AutoConfig.from_pretrained(config, trust_remote_code=True)
 
-    print(f"Saving the config to {path}")
+    logger.info(f"Saving the config to {path}")
     config.save_pretrained(path)
-    print(f"Loading the tokenizer from {tokenizer}")
+    logger.info(f"Loading the tokenizer from {tokenizer}")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer, trust_remote_code=True)
-    print(f"Saving the tokenizer to {path}")
+    logger.info(f"Saving the tokenizer to {path}")
     tokenizer.save_pretrained(path)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         checkpoint_path = os.path.join(tmpdir, 'checkpoint.pt')
-        print(f"Saving the distributed checkpoint to {checkpoint_path}")
+        logger.info(f"Saving the distributed checkpoint to {checkpoint_path}")
         dcp_to_torch_save(checkpoint, checkpoint_path)
 
-        print(f"Initializing the model from config\n{config}")
+        logger.info(f"Initializing the model from config\n{config}")
         model = AutoModelForCausalLM.from_config(config)
-        print(model)
-        print("Loading state dict from the checkpoint")
+        logger.info(model)
+        logger.info("Loading state dict from the checkpoint")
+
+        # Add datetime.timedelta and io.BytesIO to safe globals
+        torch.serialization.add_safe_globals([timedelta, io.BytesIO])
+        # torch.load now with default weights_only=True will work
         model.load_state_dict(torch.load(checkpoint_path, map_location='cpu')['model'])
-        print(f"Saving the model to {path}")
+
+        logger.info(f"Saving the model to {path}")
         model.save_pretrained(path)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    init_logger()
+    parser = argparse.ArgumentParser("Convert DCP format model weights to huggingface-style.")
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--path", type=str, required=True)
     parser.add_argument("--config", type=str, required=True)

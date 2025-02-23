@@ -59,7 +59,8 @@ context_parallel_degree = 1
 pipeline_parallel_degree = 1
 
 [float8]
-enable_float8_linear = false
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
 
 [activation_checkpoint]
 mode = "none"
