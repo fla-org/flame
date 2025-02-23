@@ -24,11 +24,10 @@ from flame.optimizer import build_lr_schedulers, build_optimizers
 from flame.parallelisms.parallelize_fla import parallelize_fla
 from flame.parallelisms.pipeline_fla import pipeline_fla
 from flame.utils import device_module, device_type
-from torchtitan.float8 import Float8Handler
+from torchtitan.float8 import Float8Converter
 from torchtitan.logging import init_logger, logger
 from torchtitan.parallelisms import ParallelDims
-from torchtitan.profiling import (maybe_enable_memory_snapshot,
-                                  maybe_enable_profiling)
+from torchtitan.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
 
 
 # Enable debug tracing on failure: https://pytorch.org/docs/stable/elastic/errors.html
@@ -41,7 +40,9 @@ def main(job_config: JobConfig):
     color = utils.NoColor if job_config.metrics.disable_color_printing else utils.Color
 
     if job_config.job.print_args:
-        logger.info(f"{color.green}{json.dumps(job_config.to_dict(), indent=2, sort_keys=True)}{color.reset}")
+        logger.info(
+            f"{color.green}{json.dumps(job_config.to_dict(), indent=2, sort_keys=True)}{color.reset}"
+        )
 
     # take control of garbage collection to avoid stragglers
     gc_handler = utils.GarbageCollection(gc_freq=job_config.training.gc_freq)
@@ -80,35 +81,38 @@ def main(job_config: JobConfig):
 
     # Set random seed, and maybe enable deterministic mode (mainly for debugging, expect perf loss)
     utils.set_determinism(
-        world_mesh,
-        device,
-        job_config.training.seed,
-        job_config.training.deterministic
+        world_mesh, device, job_config.training.seed, job_config.training.deterministic
     )
 
     logger.info("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(
         job_config.model.tokenizer_path,
         trust_remote_code=True,
-        model_max_length=int(1e10)
+        model_max_length=int(1e10),
     )
     logger.info(f"{tokenizer}")
     logger.info(
         f"Loading dataset {job_config.training.dataset}"
-        f":{job_config.training.dataset_name}" if job_config.training.dataset_name is not None else ""
+        f":{job_config.training.dataset_name}"
+        if job_config.training.dataset_name is not None
+        else ""
     )
 
     min_num_shards = dp_degree * job_config.training.num_workers
-    if len(job_config.training.dataset.split(',')) == 1:
+    if len(job_config.training.dataset.split(",")) == 1:
         dataset = load_dataset(
             path=job_config.training.dataset,
-            name=getattr(job_config.training, 'dataset_name', None),
-            data_dir=getattr(job_config.training, 'data_dir', None),
-            data_files=getattr(job_config.training, 'data_files', None),
+            name=getattr(job_config.training, "dataset_name", None),
+            data_dir=getattr(job_config.training, "data_dir", None),
+            data_files=getattr(job_config.training, "data_files", None),
             split=job_config.training.dataset_split or "train",
             trust_remote_code=True,
             streaming=job_config.training.streaming,
-            num_proc=job_config.training.num_workers if not job_config.training.streaming else None
+            num_proc=(
+                job_config.training.num_workers
+                if not job_config.training.streaming
+                else None
+            ),
         )
         logger.info(f"{dataset}")
 
@@ -145,32 +149,51 @@ def main(job_config: JobConfig):
             else:
                 dataset = shuffle(dataset, seed=job_config.training.seed)
     else:
-        datasets = job_config.training.dataset.split(',')
+        datasets = job_config.training.dataset.split(",")
         if job_config.training.dataset_name is not None:
-            dataset_names = [name or None for name in job_config.training.dataset_name.split(',')]
-            assert len(dataset_names) == len(datasets), "The number of dataset names must match the number of datasets"
+            dataset_names = [
+                name or None for name in job_config.training.dataset_name.split(",")
+            ]
+            assert len(dataset_names) == len(
+                datasets
+            ), "The number of dataset names must match the number of datasets"
         else:
             dataset_names = [None] * len(datasets)
         if job_config.training.dataset_split is not None:
-            dataset_splits = [split or 'train' for split in job_config.training.dataset_split.split(',')]
-            assert len(dataset_splits) == len(datasets), "The number of dataset splits must match the number of datasets"
+            dataset_splits = [
+                split or "train"
+                for split in job_config.training.dataset_split.split(",")
+            ]
+            assert len(dataset_splits) == len(
+                datasets
+            ), "The number of dataset splits must match the number of datasets"
         else:
-            dataset_splits = ['train'] * len(datasets)
+            dataset_splits = ["train"] * len(datasets)
         if job_config.training.data_dir is not None:
-            data_dirs = [data_dir or None for data_dir in job_config.training.data_dir.split(',')]
-            assert len(data_dirs) == len(datasets), "The number of data dirs must match the number of datasets"
+            data_dirs = [
+                data_dir or None for data_dir in job_config.training.data_dir.split(",")
+            ]
+            assert len(data_dirs) == len(
+                datasets
+            ), "The number of data dirs must match the number of datasets"
         else:
             data_dirs = [None] * len(datasets)
         if job_config.training.data_files is not None:
-            data_files = job_config.training.data_files.split(',')
-            assert len(data_files) == len(datasets), "The number of data files must match the number of datasets"
+            data_files = job_config.training.data_files.split(",")
+            assert len(data_files) == len(
+                datasets
+            ), "The number of data files must match the number of datasets"
         else:
             data_files = [None] * len(datasets)
         if job_config.training.data_probs is not None:
-            data_probs = [float(p) for p in job_config.training.data_probs.split(',')]
-            assert len(data_probs) == len(datasets), "The number of data probabilities must match the number of datasets"
+            data_probs = [float(p) for p in job_config.training.data_probs.split(",")]
+            assert len(data_probs) == len(
+                datasets
+            ), "The number of data probabilities must match the number of datasets"
         else:
-            raise ValueError("Data sampling probabilities are required if using multiple datasets")
+            raise ValueError(
+                "Data sampling probabilities are required if using multiple datasets"
+            )
 
         subsets = []
         for i, prob in enumerate(data_probs):
@@ -182,18 +205,25 @@ def main(job_config: JobConfig):
                 split=dataset_splits[i],
                 trust_remote_code=True,
                 streaming=job_config.training.streaming,
-                num_proc=job_config.training.num_workers if not job_config.training.streaming else None
+                num_proc=(
+                    job_config.training.num_workers
+                    if not job_config.training.streaming
+                    else None
+                ),
             )
             logger.info(
-                f"Subset {color.cyan}{datasets[i]}" + (f":{dataset_names[i]} " if dataset_names[i] else " ") +
-                f"(p = {prob:.3f}){color.reset}:\n" +
-                f"{subset}"
+                f"Subset {color.cyan}{datasets[i]}"
+                + (f":{dataset_names[i]} " if dataset_names[i] else " ")
+                + f"(p = {prob:.3f}){color.reset}:\n"
+                + f"{subset}"
             )
 
             logger.info(f"Shuffling the dataset with seed {job_config.training.seed}")
             if not job_config.training.streaming:
                 # the states of map-style dataset is recoverable after shuffling
-                subset = subset.shuffle(seed=job_config.training.seed).to_iterable_dataset(num_shards=min_num_shards)
+                subset = subset.shuffle(
+                    seed=job_config.training.seed
+                ).to_iterable_dataset(num_shards=min_num_shards)
             else:
                 if subset.num_shards < min_num_shards:
                     logger.warning(
@@ -228,20 +258,24 @@ def main(job_config: JobConfig):
                         buffer_size=max(128, 1024 // len(datasets)),
                     )
 
-            if 'text' in subset.column_names:
-                subset = subset.select_columns('text')
-            elif 'content' in subset.column_names:
-                subset = subset.select_columns('content')
+            if "text" in subset.column_names:
+                subset = subset.select_columns("text")
+            elif "content" in subset.column_names:
+                subset = subset.select_columns("content")
             else:
-                raise ValueError(f"Subset {datasets[i]} has no 'text' or 'content' column")
+                raise ValueError(
+                    f"Subset {datasets[i]} has no 'text' or 'content' column"
+                )
             subsets.append(subset)
 
-        logger.info(f"Interleaving {len(subsets)} datasets with probabilities {data_probs}")
+        logger.info(
+            f"Interleaving {len(subsets)} datasets with probabilities {data_probs}"
+        )
         dataset = interleave_datasets(
             datasets=subsets,
             probabilities=data_probs,
-            stopping_strategy='all_exhausted',
-            seed=job_config.training.seed
+            stopping_strategy="all_exhausted",
+            seed=job_config.training.seed,
         )
         logger.info(f"{dataset}")
 
@@ -258,7 +292,7 @@ def main(job_config: JobConfig):
         num_workers=job_config.training.num_workers,
         pin_memory=job_config.training.pin_memory,
         persistent_workers=job_config.training.persistent_workers,
-        snapshot_every_n_steps=job_config.checkpoint.interval
+        snapshot_every_n_steps=job_config.checkpoint.interval,
     )
 
     logger.info(f"Loading model config from {job_config.model.config}")
@@ -278,17 +312,29 @@ def main(job_config: JobConfig):
         model_config.fuse_norm = False
     model_config.vocab_size = tokenizer.vocab_size
 
-    logger.info(f"Building model from the config\n{color.green}{model_config}{color.reset}")
-    with torch.device('meta'):
+    logger.info(
+        f"Building model from the config\n{color.green}{model_config}{color.reset}"
+    )
+    with torch.device("meta"):
         model = AutoModelForCausalLM.from_config(model_config)
         # defer weight initialization until after parallelisms are applied
-        model.apply(lambda m: setattr(m, '_is_hf_initialized', False))
+        model.apply(lambda m: setattr(m, "_is_hf_initialized", False))
     logger.info(f"{color.blue}\n{model}{color.reset}\n")
 
-    # a no-op hander if float8 is not enabled
-    float8_handler = Float8Handler(job_config, parallel_dims)
-    # swap to Float8Linear based on float8 configs
-    float8_handler.convert_to_float8_training(model)
+    """
+    # !TODO[flame]: torchtitan@57387af0e0e6173e7c0f3a38ac5db1134bb376d5 introduces a bug that cannot handel the case:
+    FP8 is not enabled & torchao is not installed
+    So we monkey patch the code to avoid this issue temporarily
+    """
+    float8_config = job_config.float8
+    if not float8_config.enable_float8_linear:
+        fp8_enabled = False
+    else:
+        # a no-op hander if float8 is not enabled
+        float8_handler = Float8Converter(job_config, parallel_dims)
+        # swap to Float8Linear based on float8 configs
+        float8_handler.convert_to_float8_training(model)
+        fp8_enabled = float8_handler.enabled
 
     # log model size
     model_param_count = model.num_parameters()
@@ -310,12 +356,7 @@ def main(job_config: JobConfig):
     if parallel_dims.pp_enabled:
         # apply PT-D Pipeline Parallel
         pp_schedule, model_parts = pipeline_fla(
-            model,
-            pp_mesh,
-            parallel_dims,
-            job_config,
-            device,
-            model_config
+            model, pp_mesh, parallel_dims, job_config, device, model_config
         )
         # when PP is enabled, `model` obj is no longer used after this point, model_parts is used instead
         del model
@@ -402,27 +443,48 @@ def main(job_config: JobConfig):
 
     checkpoint.reset()
 
-    global_batch_size = job_config.training.batch_size * dp_degree * job_config.training.gradient_accumulation_steps
+    global_batch_size = (
+        job_config.training.batch_size
+        * dp_degree
+        * job_config.training.gradient_accumulation_steps
+    )
     num_tokens_per_step = global_batch_size * job_config.training.seq_len
     # train loop
     logger.info(f"{color.red}***** Running training *****{color.reset}")
     logger.info(f"{color.green}  Training starts at step {train_state.step + 1}")
-    logger.info(f"{color.green}  Number of tokens per sequence = {job_config.training.seq_len:,}")
-    logger.info(f"{color.green}  Gradient Accumulation steps = {job_config.training.gradient_accumulation_steps}")
-    logger.info(f"{color.green}  Instantaneous batch size (per device) = {job_config.training.batch_size:,}")
-    logger.info(f"{color.green}  Global batch size (w. parallel, distributed & accumulation) = {global_batch_size:,}"
-                f" ({num_tokens_per_step:,} tokens)")
-    logger.info(f"{color.green}  Total optimization steps = {job_config.training.steps:,} "
-                f"({job_config.training.steps * num_tokens_per_step:,} tokens)")
-    logger.info(f"{color.green}  Warmup steps = {job_config.training.warmup_steps:,}"
-                f" ({job_config.training.warmup_steps * num_tokens_per_step:,} tokens)")
-    logger.info(f"{color.green}  Number of parameters = {model_param_count:,} {color.reset}")
+    logger.info(
+        f"{color.green}  Number of tokens per sequence = {job_config.training.seq_len:,}"
+    )
+    logger.info(
+        f"{color.green}  Gradient Accumulation steps = {job_config.training.gradient_accumulation_steps}"
+    )
+    logger.info(
+        f"{color.green}  Instantaneous batch size (per device) = {job_config.training.batch_size:,}"
+    )
+    logger.info(
+        f"{color.green}  Global batch size (w. parallel, distributed & accumulation) = {global_batch_size:,}"
+        f" ({num_tokens_per_step:,} tokens)"
+    )
+    logger.info(
+        f"{color.green}  Total optimization steps = {job_config.training.steps:,} "
+        f"({job_config.training.steps * num_tokens_per_step:,} tokens)"
+    )
+    logger.info(
+        f"{color.green}  Warmup steps = {job_config.training.warmup_steps:,}"
+        f" ({job_config.training.warmup_steps * num_tokens_per_step:,} tokens)"
+    )
+    logger.info(
+        f"{color.green}  Number of parameters = {model_param_count:,} {color.reset}"
+    )
 
-    with maybe_enable_profiling(
-        job_config, global_step=train_state.step
-    ) as torch_profiler, maybe_enable_memory_snapshot(
-        job_config, global_step=train_state.step
-    ) as memory_profiler:
+    with (
+        maybe_enable_profiling(
+            job_config, global_step=train_state.step
+        ) as torch_profiler,
+        maybe_enable_memory_snapshot(
+            job_config, global_step=train_state.step
+        ) as memory_profiler,
+    ):
         while train_state.step < job_config.training.steps:
             train_state.step += 1
             gc_handler.run(train_state.step)
@@ -435,7 +497,7 @@ def main(job_config: JobConfig):
                 # get batch
                 data_load_start = time.perf_counter()
                 batch = next(data_iterator)
-                input_ids, labels = batch['input_ids'], batch['labels']
+                input_ids, labels = batch["input_ids"], batch["labels"]
                 ntokens_since_last_log += labels.numel()
                 data_loading_times.append(time.perf_counter() - data_load_start)
 
@@ -468,9 +530,9 @@ def main(job_config: JobConfig):
                 optional_context_parallel_ctx = (
                     utils.create_context_parallel_ctx(
                         cp_mesh=world_mesh["cp"],
-                        cp_buffers=[input_ids, labels] + [m.freqs_cis for m in model_parts],
-                        cp_seq_dims=[1, 1] + [0 for _ in model_parts],
-                        cp_no_restore_buffers={input_ids, labels},
+                        cp_buffers=[input_ids, labels, position_ids],
+                        cp_seq_dims=[1, 1, 1],
+                        cp_no_restore_buffers={input_ids, labels, position_ids},
                         cp_rotate_method=job_config.experimental.context_parallel_rotate_method,
                     )
                     if parallel_dims.cp_enabled
@@ -522,8 +584,12 @@ def main(job_config: JobConfig):
 
             # optimizer step
             checkpoint.maybe_wait_for_staging()
-            if job_config.training.skip_nan_inf and (grad_norm.isnan() or grad_norm.isinf()):
-                logger.warning(f"Skipping optimizer step - detected invalid gradient norm: {grad_norm:.4f}")
+            if job_config.training.skip_nan_inf and (
+                grad_norm.isnan() or grad_norm.isinf()
+            ):
+                logger.warning(
+                    f"Skipping optimizer step - detected invalid gradient norm: {grad_norm:.4f}"
+                )
                 optimizers.zero_grad()
                 train_state.skipped_step += 1
             else:
@@ -532,7 +598,9 @@ def main(job_config: JobConfig):
 
             # calculate float8 dynamic amax/scale for all-parameter for FSDP2
             # it issues a single all-reduce for all parameters at once for better performance
-            float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
+            # !TODO[flame]: torchtitan@57387af0e0e6173e7c0f3a38ac5db1134bb376d5 introduces a bug that cannot handel the case:
+            if fp8_enabled:
+                float8_handler.precompute_float8_dynamic_scale_for_fsdp(model_parts)
 
             # log metrics
             if (
@@ -582,7 +650,9 @@ def main(job_config: JobConfig):
 
                 last_lr = lr_schedulers.schedulers[0].get_last_lr()[0]
                 # tokens per second per device, abbreviated as tgs
-                tgs = ntokens_since_last_log / (time_delta * parallel_dims.non_data_parallel_size)
+                tgs = ntokens_since_last_log / (
+                    time_delta * parallel_dims.non_data_parallel_size
+                )
                 # model FLOPS utilization
                 # For its definition and calculation, please refer to the PaLM paper:
                 # httgs://arxiv.org/abs/2204.02311
@@ -592,7 +662,11 @@ def main(job_config: JobConfig):
                 time_data_loading = sum(data_loading_times) / len(data_loading_times)
                 time_data_loading_pct = 100 * sum(data_loading_times) / time_delta
 
-                eta = train_state.elapsed * (job_config.training.steps - train_state.step) / train_state.step
+                eta = (
+                    train_state.elapsed
+                    * (job_config.training.steps - train_state.step)
+                    / train_state.step
+                )
 
                 device_mem_stats = device_memory_monitor.get_peak_stats()
 

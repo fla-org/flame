@@ -20,15 +20,17 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed.checkpoint.state_dict import (StateDictOptions,
-                                                     get_model_state_dict,
-                                                     set_model_state_dict)
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    set_model_state_dict,
+)
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.utils.data import DataLoader
 
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.logging import init_logger, logger
-from torchtitan.optimizer import OptimizersContainer, SchedulersContainer
+from torchtitan.optimizer import OptimizersContainer, LRSchedulersContainer
 
 
 class IntervalType(enum.Enum):
@@ -149,7 +151,7 @@ class CheckpointManager:
         dataloader: DataLoader,
         model_parts: List[nn.Module],
         optimizers: OptimizersContainer,
-        lr_schedulers: SchedulersContainer,
+        lr_schedulers: LRSchedulersContainer,
         states: Dict[str, Any],
         job_config: JobConfig,
     ) -> None:
@@ -336,7 +338,9 @@ class CheckpointManager:
     def _async_with_pinned_memory(self, checkpoint_id: str) -> None:
         try:
             from torch.distributed._state_dict_utils import (
-                _copy_state_dict, _create_cpu_state_dict)
+                _copy_state_dict,
+                _create_cpu_state_dict,
+            )
         except ImportError as e:
             raise ImportError(
                 "Please install the latest PyTorch nightly to use async checkpointing with pinned memory."
