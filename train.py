@@ -27,7 +27,6 @@ from flame.parallelisms.pipeline_fla import pipeline_fla
 from flame.utils import device_module, device_type
 from torchtitan.float8 import Float8Converter
 from torchtitan.logging import init_logger, logger
-from torchtitan.model_converter import build_model_converters
 from torchtitan.parallelisms import ParallelDims
 from torchtitan.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
 
