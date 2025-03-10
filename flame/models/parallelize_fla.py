@@ -12,23 +12,28 @@ from collections import defaultdict
 import torch
 import torch.nn as nn
 from torch.distributed import DeviceMesh
-from torch.distributed._composable.fsdp import (CPUOffloadPolicy,
-                                                MixedPrecisionPolicy,
-                                                fully_shard)
+from torch.distributed._composable.fsdp import (
+    CPUOffloadPolicy,
+    MixedPrecisionPolicy,
+    fully_shard,
+)
 from torch.distributed._composable.replicate import replicate
 from torch.distributed._tensor import Replicate, Shard
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import \
-    checkpoint_wrapper as ptd_checkpoint_wrapper
-from torch.distributed.tensor.parallel import (ColwiseParallel,
-                                               PrepareModuleInput,
-                                               PrepareModuleOutput,
-                                               RowwiseParallel,
-                                               SequenceParallel,
-                                               parallelize_module)
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper as ptd_checkpoint_wrapper,
+)
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    PrepareModuleInput,
+    PrepareModuleOutput,
+    RowwiseParallel,
+    SequenceParallel,
+    parallelize_module,
+)
 
-from fla.modules.fused_linear_cross_entropy import LinearLossParallel
-from fla.modules.mlp import SwiGLULinearParallel
-from fla.modules.parallel import PrepareModuleWeight
+# from fla.modules.fused_linear_cross_entropy import LinearLossParallel
+# from fla.modules.mlp import SwiGLULinearParallel
+# from fla.modules.parallel import PrepareModuleWeight
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
 from torchtitan.tools.logging import logger
@@ -126,8 +131,10 @@ class TPPlan:
         # TODO(vkuzo): add the items below to __init__.py of torchao.float8 and import from there
         try:
             from torchao.float8.float8_tensor_parallel import (
-                Float8ColwiseParallel, Float8RowwiseParallel,
-                PrepareFloat8ModuleInput)
+                Float8ColwiseParallel,
+                Float8RowwiseParallel,
+                PrepareFloat8ModuleInput,
+            )
         except ImportError:
             Float8ColwiseParallel = None
             Float8RowwiseParallel = None
@@ -153,18 +160,22 @@ class TPPlan:
             f"{self.base_model_prefix}.norm": SequenceParallel(),
         }
         if self.loss_parallel:
-            plans.update({
-                "lm_head": ColwiseParallel(
-                    input_layouts=Shard(1),
-                    output_layouts=Shard(-1) if self.loss_parallel else Replicate(),
-                    use_local_output=not self.loss_parallel,
-                ),
-            })
+            plans.update(
+                {
+                    "lm_head": ColwiseParallel(
+                        input_layouts=Shard(1),
+                        output_layouts=Shard(-1) if self.loss_parallel else Replicate(),
+                        use_local_output=not self.loss_parallel,
+                    ),
+                }
+            )
         else:
-            plans.update({
-                "lm_head": PrepareModuleWeight(layouts=Replicate()),
-                "criterion": LinearLossParallel()
-            })
+            plans.update(
+                {
+                    "lm_head": PrepareModuleWeight(layouts=Replicate()),
+                    "criterion": LinearLossParallel(),
+                }
+            )
         return plans
 
     @property
@@ -173,12 +184,14 @@ class TPPlan:
             "attn_norm": SequenceParallel(),
             **self.attn_plan,
             "mlp_norm": SequenceParallel(),
-            **self.mlp_plan
+            **self.mlp_plan,
         }
 
     @property
     def attn_plan(self):
-        raise NotImplementedError(f"TP plans for token mixing layers of {self.model.config.model_type} not implemented")
+        raise NotImplementedError(
+            f"TP plans for token mixing layers of {self.model.config.model_type} not implemented"
+        )
 
     @property
     def mlp_plan(self):
@@ -190,9 +203,7 @@ class TPPlan:
             "mlp.gate_proj": self.colwise_parallel(),
             "mlp.up_proj": self.colwise_parallel(),
             "mlp.down_proj": self.rowwise_parallel(output_layouts=Shard(1)),
-            "mlp.swiglu_linear": SwiGLULinearParallel(
-                output_layouts=Shard(1)
-            )
+            "mlp.swiglu_linear": SwiGLULinearParallel(output_layouts=Shard(1)),
         }
 
 
@@ -208,7 +219,7 @@ class TransformerTPPlan(TPPlan):
             "attn.q_proj": self.colwise_parallel(),
             "attn.k_proj": self.colwise_parallel(),
             "attn.v_proj": self.colwise_parallel(),
-            "attn.o_proj": self.rowwise_parallel(output_layouts=Shard(1))
+            "attn.o_proj": self.rowwise_parallel(output_layouts=Shard(1)),
         }
 
 
@@ -228,14 +239,11 @@ class GLATPPlan(TPPlan):
             "attn.gk_proj.0": PrepareModuleWeight(layouts=Replicate()),
             "attn.gk_proj.1": self.colwise_parallel(),
             "attn.g_norm": SequenceParallel(sequence_dim=-1),
-            "attn.o_proj": self.rowwise_parallel(output_layouts=Shard(1))
+            "attn.o_proj": self.rowwise_parallel(output_layouts=Shard(1)),
         }
 
 
-TP_PLAN_MAP = {
-    "transformer": TransformerTPPlan,
-    "gla": GLATPPlan
-}
+TP_PLAN_MAP = {"transformer": TransformerTPPlan, "gla": GLATPPlan}
 
 
 def apply_tp(
@@ -250,7 +258,9 @@ def apply_tp(
     # transformer block's inputs)
     # 2. Parallelize the root norm layer over the sequence dim
     # 3. Parallelize the final linear output layer
-    tp_plan = TP_PLAN_MAP[model.config.model_type](model, loss_parallel=loss_parallel, enable_float8=enable_float8)
+    tp_plan = TP_PLAN_MAP[model.config.model_type](
+        model, loss_parallel=loss_parallel, enable_float8=enable_float8
+    )
     parallelize_module(model, tp_mesh, tp_plan.model_plan)
 
     blocks = get_blocks(model)
@@ -265,8 +275,7 @@ def apply_tp(
             )
 
     if enable_async_tp:
-        from torch.distributed._symmetric_memory import \
-            enable_symm_mem_for_group
+        from torch.distributed._symmetric_memory import enable_symm_mem_for_group
 
         torch._inductor.config._micro_pipeline_tp = True
         enable_symm_mem_for_group(tp_mesh.get_group().group_name)
@@ -310,7 +319,9 @@ def _apply_ac_to_block(module: nn.Module, ac_config):
         )
     if use_op_sac:
         from torch.utils.checkpoint import (
-            CheckpointPolicy, create_selective_checkpoint_contexts)
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
 
         def _get_custom_policy(meta):
             def _custom_policy(ctx, func, *args, **kwargs):
@@ -379,13 +390,23 @@ def apply_compile(model: nn.Module):
             blocks.register_module(layer_id, block)
         logger.info("Compiling each block with torch.compile")
 
-    base_model_prefix = getattr(model, "base_model_prefix", "model")
+    real_model = get_actual_model(model)
+
     logger.info("Compiling the embedding, norm, and lm_head layers with torch.compile")
-    embeddings = torch.compile(getattr(model, base_model_prefix).embeddings, fullgraph=True)
-    getattr(model, base_model_prefix).register_module("embeddings", embeddings)
-    norm = torch.compile(getattr(model, base_model_prefix).norm, fullgraph=True)
-    getattr(model, base_model_prefix).register_module("norm", norm)
-    model.register_module("lm_head", torch.compile(model.lm_head, fullgraph=True))
+    embeddings_key = get_real_components_name(real_model, "tok_embeddings")
+    if embeddings_key is not None:
+        embeddings = torch.compile(getattr(real_model, embeddings_key), fullgraph=True)
+        real_model.register_module(embeddings_key, embeddings)
+
+    norm_key = get_real_components_name(real_model, "norm")
+    if norm_key is not None:
+        norm = torch.compile(getattr(real_model, norm_key), fullgraph=True)
+        real_model.register_module(norm_key, norm)
+
+    lm_head_key = get_real_components_name(model, "lm_head")
+    if lm_head_key is not None:
+        lm_head = torch.compile(getattr(model, lm_head_key), fullgraph=True)
+        model.register_module(lm_head_key, lm_head)
 
     logger.info("Compiling the entire model with torch.compile")
     model = torch.compile(model)
@@ -474,13 +495,65 @@ def apply_ddp(
     logger.info("Applied DDP to the model")
 
 
-def get_blocks(model):
-    # TODO[flame]: adapt for network not using 'layers' attribute
+def get_actual_model(model):
     base_model_prefix = getattr(model, "base_model_prefix", "model")
     if not hasattr(model, base_model_prefix):
         return None
     model = getattr(model, base_model_prefix)
+    return model
+
+
+def get_blocks(model):
+    # TODO[flame]: adapt for network not using 'layers' attribute
+    model = get_actual_model(model)
     if not hasattr(model, "layers"):
-        logger.warning('no "layers" in model for activation checkpointing')
+        logger.warning('no "layers" in model can be found')
         return None
     return model.layers
+
+
+def get_real_components_name(model, component_name):
+    """
+    We try to catch tok_embeddings, norm layers and lm_head layers
+    We do not catch the layer names in the blocks, for blocks see `get_blocks`
+    We assume the model has the following structure:
+    LlamaForCausalLM:
+        Model:
+            embed_tokens,
+            layers,
+            norm,
+        lm_head
+    ***
+    so, to search 'tok_embeddings' and 'norm' we need to pass `get_actual_model(model)`
+    and for 'lm_head' we need to pass `model`
+    ***
+    """
+
+    if component_name == "tok_embeddings":
+        if hasattr(model, "tok_embeddings"):
+            return "tok_embeddings"
+        elif hasattr(model, "embed_tokens"):
+            return "embed_tokens"
+        elif hasattr(model, "embeddings"):
+            return "embeddings"
+        else:
+            logger.warning("No tok_embeddings found in model")
+            return None
+
+    elif component_name == "norm":
+        if hasattr(model, "norm"):
+            return "norm"
+        elif hasattr(model, "norms"):
+            return "norms"
+        elif hasattr(model, "layernorm"):
+            return "layernorm"
+        else:
+            logger.warning("No norm found in model")
+            return None
+
+    elif component_name == "lm_head":
+        if hasattr(model, "lm_head"):
+            return "lm_head"
+        else:
+            logger.warning("No lm_head found in model")
+            return None

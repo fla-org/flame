@@ -13,17 +13,27 @@ import torch
 import torch.nn as nn
 from torch.distributed import DeviceMesh
 from torch.distributed.pipelining import PipelineStage
-from torch.distributed.pipelining.schedules import (ScheduleZBVZeroBubble,
-                                                    _PipelineSchedule,
-                                                    get_schedule_class)
+from torch.distributed.pipelining.schedules import (
+    ScheduleZBVZeroBubble,
+    _PipelineSchedule,
+    get_schedule_class,
+)
 from transformers import PretrainedConfig
 
 from torchtitan.config_manager import JobConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
-from torchtitan.distributed.pipeline import (build_pipeline_schedule,
-                                             generate_split_points,
-                                             stage_ids_this_rank)
+from torchtitan.distributed.pipeline import (
+    build_pipeline_schedule,
+    generate_split_points,
+    stage_ids_this_rank,
+)
 from torchtitan.tools.logging import logger
+
+from flame.models.parallelize_fla import (
+    get_blocks,
+    get_real_components_name,
+    get_actual_model,
+)
 
 DeviceType = Union[int, str, torch.device]
 
@@ -90,21 +100,41 @@ def pipeline_fla_manual_split(
     ) -> tuple[PipelineStage, nn.Module]:
         model = copy.deepcopy(whole_model)
         if not is_first:
-            model.tok_embeddings = None
+            # we do `model.tok_embeddings = None` here
+            real_model = get_actual_model(model)
+            tok_embeddings_name = get_real_components_name(real_model, "tok_embeddings")
+            setattr(real_model, tok_embeddings_name, None)
 
         drop_layers = start_layer is not None
-        for name in list(model.layers.keys()):
-            # we keep layers in a contiguous region between start (inclusive) and stop (exclusive)
-            if f"layers.{name}" == start_layer:
+        # Get module dictionary from get_blocks(model)
+        # and Create a list of keys before modifying dictionary
+        module_dict = get_blocks(model)._modules  # Store reference
+        layer_names = list(module_dict.keys())
+
+        # Iterate over the list of keys instead of `_modules.items()`
+        for name in layer_names:
+            # Dynamically determine prefix (blocks.* or layers.*)
+            prefix = start_layer.split(".")[0] if start_layer else "layers"
+            layer_name = f"{prefix}.{name}"  # Construct the correct name format
+
+            # Ensure `drop_layers` activation is based on actual naming
+            if layer_name == start_layer:
                 drop_layers = False
-            if f"layers.{name}" == stop_layer:
+            if layer_name == stop_layer:
                 drop_layers = True
+
+            # Delete layer if drop_layers is active
             if drop_layers:
-                del model.layers[name]
+                del module_dict[name]  # Safe deletion from stored dictionary
 
         if not is_last:
-            model.norm = None
-            model.output = None
+            # we do `model.norm = None` and `model.output = None`
+            real_model = get_actual_model(model)
+            norm_name = get_real_components_name(real_model, "norm")
+            setattr(real_model, norm_name, None)
+
+            head_name = get_real_components_name(model, "lm_head")
+            setattr(model, head_name, None)
 
         stage = PipelineStage(
             model,
