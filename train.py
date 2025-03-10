@@ -17,12 +17,15 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 import fla  # noqa
 from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
 from fla.ops.common.utils import prepare_position_ids
+
+
 from flame.components.checkpoint import TrainState
 from flame.components.optimizer import build_lr_schedulers
 from flame.config_manager import JobConfig
 from flame.data import build_dataloader, shuffle
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
+from flame.models.activation_offloading import get_act_offloading_ctx_manager
 from flame.tools.utils import get_num_flop_per_token
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.ft import FTParallelDims, init_ft_manager
@@ -31,14 +34,22 @@ from torchtitan.components.optimizer import build_optimizers
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed import utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
-from torchtitan.protocols.train_spec import (TrainSpec, get_train_spec,
-                                             register_train_spec)
+from torchtitan.protocols.train_spec import (
+    TrainSpec,
+    get_train_spec,
+    register_train_spec,
+)
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
-from torchtitan.tools.metrics import (build_device_memory_monitor,
-                                      build_metric_logger)
-from torchtitan.tools.profiling import (maybe_enable_memory_snapshot,
-                                        maybe_enable_profiling)
+from torchtitan.tools.metrics import (
+    build_device_memory_monitor,
+    build_metric_logger,
+    ensure_pp_loss_visible,
+)
+from torchtitan.tools.profiling import (
+    maybe_enable_memory_snapshot,
+    maybe_enable_profiling,
+)
 
 register_train_spec(
     TrainSpec(
@@ -122,6 +133,16 @@ def main(job_config: JobConfig):
         dp_degree, dp_rank = 1, 0
 
     if parallel_dims.pp_enabled:
+        raise NotImplementedError(
+            "Pipeline parallelism is not supported in this version"
+        )
+        """
+        ! TODO[flame]: We need to fix the pipeline parallelism for flame
+        [x] Match the key of models' components with the actual naming
+        [ ] Fix the post-init and tie-embedding for pipeline parallelism, HF's transformer automatically
+            forces to tie if head is None, we need to handle this case
+        [ ] 
+        """
         pp_mesh = world_mesh["pp"]
 
     # Set random seed, and maybe enable deterministic mode (mainly for debugging, expect perf loss)
@@ -372,7 +393,10 @@ def main(job_config: JobConfig):
     )
     with torch.device("meta"):
         model = AutoModelForCausalLM.from_config(model_config)
-        if model_config.fuse_cross_entropy:
+        if (
+            getattr(model_config, "fuse_cross_entropy", False)
+            and FusedLinearCrossEntropyLoss is not None
+        ):
             model.criterion = FusedLinearCrossEntropyLoss(
                 num_chunks=8 // parallel_dims.tp
             )
@@ -402,6 +426,7 @@ def main(job_config: JobConfig):
 
     # apply parallelisms and initialization
     if parallel_dims.pp_enabled:
+
         # apply PT-D Pipeline Parallel
         (
             pp_schedule,
@@ -430,6 +455,10 @@ def main(job_config: JobConfig):
             with torch.no_grad():
                 m.post_init()
             m.train()
+
+        # confirm that user will be able to view loss metrics on the console
+        ensure_pp_loss_visible(parallel_dims, job_config, color)
+
     else:
         # apply PT-D Tensor Parallel, activation checkpointing, torch.compile, Data Parallel
         train_spec.parallelize_fn(model, world_mesh, parallel_dims, job_config)
@@ -502,6 +531,11 @@ def main(job_config: JobConfig):
         job_config.experimental.enable_compiled_autograd,
     )
 
+    activation_offload_context = get_act_offloading_ctx_manager(
+        model,
+        job_config.activation_offload.mode == "full",
+    )
+
     # variables used to keep info for metrics logging
     ntokens_since_last_log = 0
     data_loading_times = []
@@ -542,11 +576,14 @@ def main(job_config: JobConfig):
         f"{color.green}  Number of parameters = {model_param_count:,} {color.reset}"
     )
 
-    with maybe_enable_profiling(
-        job_config, global_step=train_state.step
-    ) as torch_profiler, maybe_enable_memory_snapshot(
-        job_config, global_step=train_state.step
-    ) as memory_profiler:
+    with (
+        maybe_enable_profiling(
+            job_config, global_step=train_state.step
+        ) as torch_profiler,
+        maybe_enable_memory_snapshot(
+            job_config, global_step=train_state.step
+        ) as memory_profiler,
+    ):
         while train_state.step < job_config.training.steps:
             train_state.step += 1
             gc_handler.run(train_state.step)
@@ -587,9 +624,11 @@ def main(job_config: JobConfig):
                 if cu_seqlens is not None:
                     position_ids = prepare_position_ids(cu_seqlens).to(torch.int32)
                 else:
-                    position_ids = torch.arange(
-                        0, input_ids.shape[1], device=device_type
-                    ).repeat(input_ids.shape[0], 1).to(torch.int32)
+                    position_ids = (
+                        torch.arange(0, input_ids.shape[1], device=device_type)
+                        .repeat(input_ids.shape[0], 1)
+                        .to(torch.int32)
+                    )
                 # apply context parallelism if cp is enabled
                 # ensure CP handles the separate freqs_cis buffer for each pp stage
                 optional_context_parallel_ctx = (
@@ -606,36 +645,44 @@ def main(job_config: JobConfig):
 
                 # #! TODO[flame], we should distribute the position_ids as well with CP
                 if parallel_dims.pp_enabled:
+                    raise NotImplementedError(
+                        "Pipeline parallelism is not supported in this version"
+                    )
                     # Pipeline Parallel forward / backward inside step() call
-                    is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
-
                     with train_context(optional_context_parallel_ctx):
-                        if pp_mesh.get_local_rank() == 0:
-                            pp_schedule.step(input_ids)
-                        elif is_last_stage:
-                            losses = []
-                            pp_schedule.step(target=labels, losses=losses)
+                        targets, losses = (
+                            (labels, []) if has_last_stage else (None, None)
+                        )
+
+                        if has_first_stage:
+                            pp_schedule.step(input_ids, target=targets, losses=losses)
                         else:
-                            pp_schedule.step()
+                            pp_schedule.step(target=targets, losses=losses)
 
                     # accumulate losses across pipeline microbatches
                     # TODO: PP+FSDP unexpectedly puts the loss back to the CPU
                     loss = (
                         torch.mean(torch.stack(losses)).to(device)
-                        if is_last_stage
+                        if has_last_stage
                         else torch.tensor([-1.0], device=device)
                     )
                 else:
                     # Non-PP forward / backward
-                    with train_context(optional_context_parallel_ctx):
+                    with train_context(
+                        optional_context_parallel_ctx, activation_offload_context
+                    ):
                         output = model(
                             input_ids=input_ids,
                             labels=labels,
                             position_ids=position_ids,
                             cu_seqlens=cu_seqlens,
                         )
-                        loss = output.loss / job_config.training.gradient_accumulation_steps
+                        loss = (
+                            output.loss
+                            / job_config.training.gradient_accumulation_steps
+                        )
                         loss.backward()
+
                 losses.append(loss)
             loss = sum(losses)
 

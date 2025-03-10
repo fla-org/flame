@@ -682,6 +682,15 @@ class JobConfig:
             """,
         )
 
+        self.parser.add_argument(
+            "--activation_offload.mode",
+            type=str,
+            default="none",
+            help="""
+                if we are using activation offload or not. Options are ['none', 'full'].
+            """,
+        )
+
         # float8 configs
         self.parser.add_argument(
             "--float8.enable_fsdp_float8_all_gather",
