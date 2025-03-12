@@ -191,12 +191,6 @@ class JobConfig:
             "--optimizer.lr", type=float, default=8e-4, help="Learning rate to use"
         )
         self.parser.add_argument(
-            "--optimizer.weight_decay",
-            type=float,
-            default=0.1,
-            help="weight decay to use",
-        )
-        self.parser.add_argument(
             "--optimizer.min_lr_ratio",
             type=float,
             default=0.1,
