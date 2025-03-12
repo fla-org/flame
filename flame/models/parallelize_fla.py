@@ -12,24 +12,19 @@ from collections import defaultdict
 import torch
 import torch.nn as nn
 from torch.distributed import DeviceMesh
-from torch.distributed._composable.fsdp import (
-    CPUOffloadPolicy,
-    MixedPrecisionPolicy,
-    fully_shard,
-)
+from torch.distributed._composable.fsdp import (CPUOffloadPolicy,
+                                                MixedPrecisionPolicy,
+                                                fully_shard)
 from torch.distributed._composable.replicate import replicate
 from torch.distributed._tensor import Replicate, Shard
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper as ptd_checkpoint_wrapper,
-)
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    PrepareModuleInput,
-    PrepareModuleOutput,
-    RowwiseParallel,
-    SequenceParallel,
-    parallelize_module,
-)
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import \
+    checkpoint_wrapper as ptd_checkpoint_wrapper
+from torch.distributed.tensor.parallel import (ColwiseParallel,
+                                               PrepareModuleInput,
+                                               PrepareModuleOutput,
+                                               RowwiseParallel,
+                                               SequenceParallel,
+                                               parallelize_module)
 
 from fla.modules.fused_linear_cross_entropy import LinearLossParallel
 from fla.modules.mlp import SwiGLULinearParallel
@@ -131,10 +126,8 @@ class TPPlan:
         # TODO(vkuzo): add the items below to __init__.py of torchao.float8 and import from there
         try:
             from torchao.float8.float8_tensor_parallel import (
-                Float8ColwiseParallel,
-                Float8RowwiseParallel,
-                PrepareFloat8ModuleInput,
-            )
+                Float8ColwiseParallel, Float8RowwiseParallel,
+                PrepareFloat8ModuleInput)
         except ImportError:
             Float8ColwiseParallel = None
             Float8RowwiseParallel = None
@@ -275,7 +268,8 @@ def apply_tp(
             )
 
     if enable_async_tp:
-        from torch.distributed._symmetric_memory import enable_symm_mem_for_group
+        from torch.distributed._symmetric_memory import \
+            enable_symm_mem_for_group
 
         torch._inductor.config._micro_pipeline_tp = True
         enable_symm_mem_for_group(tp_mesh.get_group().group_name)
@@ -319,9 +313,7 @@ def _apply_ac_to_block(module: nn.Module, ac_config):
         )
     if use_op_sac:
         from torch.utils.checkpoint import (
-            CheckpointPolicy,
-            create_selective_checkpoint_contexts,
-        )
+            CheckpointPolicy, create_selective_checkpoint_contexts)
 
         def _get_custom_policy(meta):
             def _custom_policy(ctx, func, *args, **kwargs):

@@ -13,27 +13,19 @@ import torch
 import torch.nn as nn
 from torch.distributed import DeviceMesh
 from torch.distributed.pipelining import PipelineStage
-from torch.distributed.pipelining.schedules import (
-    ScheduleZBVZeroBubble,
-    _PipelineSchedule,
-    get_schedule_class,
-)
+from torch.distributed.pipelining.schedules import (ScheduleZBVZeroBubble,
+                                                    _PipelineSchedule,
+                                                    get_schedule_class)
 from transformers import PretrainedConfig
 
+from flame.models.parallelize_fla import (get_actual_model, get_blocks,
+                                          get_real_components_name)
 from torchtitan.config_manager import JobConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
-from torchtitan.distributed.pipeline import (
-    build_pipeline_schedule,
-    generate_split_points,
-    stage_ids_this_rank,
-)
+from torchtitan.distributed.pipeline import (build_pipeline_schedule,
+                                             generate_split_points,
+                                             stage_ids_this_rank)
 from torchtitan.tools.logging import logger
-
-from flame.models.parallelize_fla import (
-    get_blocks,
-    get_real_components_name,
-    get_actual_model,
-)
 
 DeviceType = Union[int, str, torch.device]
 
