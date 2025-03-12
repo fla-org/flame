@@ -31,9 +31,9 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 )
 
-# from fla.modules.fused_linear_cross_entropy import LinearLossParallel
-# from fla.modules.mlp import SwiGLULinearParallel
-# from fla.modules.parallel import PrepareModuleWeight
+from fla.modules.fused_linear_cross_entropy import LinearLossParallel
+from fla.modules.mlp import SwiGLULinearParallel
+from fla.modules.parallel import PrepareModuleWeight
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
 from torchtitan.tools.logging import logger

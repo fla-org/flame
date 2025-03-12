@@ -20,7 +20,7 @@ from fla.ops.common.utils import prepare_position_ids
 
 
 from flame.components.checkpoint import TrainState
-from flame.components.optimizer import build_lr_schedulers
+from flame.components.optimizer import build_lr_schedulers, build_optimizers
 from flame.config_manager import JobConfig
 from flame.data import build_dataloader, shuffle
 from flame.models.parallelize_fla import parallelize_fla
@@ -30,7 +30,6 @@ from flame.tools.utils import get_num_flop_per_token
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.ft import FTParallelDims, init_ft_manager
 from torchtitan.components.loss import cross_entropy_loss
-from torchtitan.components.optimizer import build_optimizers
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed import utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
@@ -669,7 +668,8 @@ def main(job_config: JobConfig):
                 else:
                     # Non-PP forward / backward
                     with train_context(
-                        optional_context_parallel_ctx, activation_offload_context
+                        optional_context_parallel_ctx,
+                        # activation_offload_context # not ready for production
                     ):
                         output = model(
                             input_ids=input_ids,

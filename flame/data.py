@@ -29,7 +29,7 @@ class BufferShuffledIterableDataset(IterableDataset):
         seq_len: int = 2048,
         rank: int = 0,
         world_size: int = 1,
-        buffer_size: int = 1024
+        buffer_size: int = 1024,
     ) -> BufferShuffledIterableDataset:
 
         self.dataset = dataset
@@ -76,7 +76,9 @@ class BufferShuffledIterableDataset(IterableDataset):
                 # if the token buffer is full, start sampling
                 # NOTE: we first convert the token ids to a tensor of shape [n_chunks, seq_len] for efficiency
                 if len(self.buffer) == 0 and len(self.tokens) >= n_tokens:
-                    self.buffer = torch.tensor(self.tokens[:n_tokens], dtype=self.dtype).view(self.buffer_size, -1)
+                    self.buffer = torch.tensor(
+                        self.tokens[:n_tokens], dtype=self.dtype
+                    ).view(self.buffer_size, -1)
                     self.tokens = self.tokens[n_tokens:]
                 if len(self.buffer) == self.buffer_size:
                     yield from self.sample(rand_it)
@@ -86,23 +88,30 @@ class BufferShuffledIterableDataset(IterableDataset):
             if n_chunks > 0:
                 n_tokens = n_chunks * self.seq_len
                 indices = torch.randperm(n_chunks, generator=g).tolist()
-                self.buffer = torch.tensor(self.tokens[:n_tokens], dtype=torch.long).view(n_chunks, -1)
+                self.buffer = torch.tensor(
+                    self.tokens[:n_tokens], dtype=torch.long
+                ).view(n_chunks, -1)
                 self.tokens = self.tokens[n_tokens:]
                 for i in indices:
-                    yield {'input_ids': self.buffer[i]}
+                    yield {"input_ids": self.buffer[i]}
 
     def tokenize(self, data, batch_size: int = 64):
         texts, states = [], []
         for sample in data:
-            texts.append(sample['text'])
+            texts.append(sample["text"])
             states.append(self.data.state_dict())
             if len(texts) == batch_size:
-                for s, tokenized in zip(states, self.tokenizer(texts, return_attention_mask=False)['input_ids']):
+                for s, tokenized in zip(
+                    states,
+                    self.tokenizer(texts, return_attention_mask=False)["input_ids"],
+                ):
                     self.states = s
                     yield tokenized
                 texts, states = [], []
         if len(texts) > 0:
-            for s, tokenized in zip(states, self.tokenizer(texts, return_attention_mask=False)['input_ids']):
+            for s, tokenized in zip(
+                states, self.tokenizer(texts, return_attention_mask=False)["input_ids"]
+            ):
                 self.states = s
                 yield tokenized
 
@@ -112,7 +121,7 @@ class BufferShuffledIterableDataset(IterableDataset):
             i = next(indices)
             start, end = self.token_id, self.token_id + self.seq_len
             self.token_id += self.seq_len
-            yield {'input_ids': self.buffer[i].to(torch.long)}
+            yield {"input_ids": self.buffer[i].to(torch.long)}
             self.buffer[i] = torch.tensor(self.tokens[start:end], dtype=self.dtype)
         self.token_id = 0
         self.tokens = self.tokens[n_tokens:]
@@ -122,14 +131,14 @@ class BufferShuffledIterableDataset(IterableDataset):
         low: int,
         high: int,
         buffer_size: int = 1024,
-        g: torch.Generator = torch.Generator()
+        g: torch.Generator = torch.Generator(),
     ) -> Iterable[int]:
         indices = torch.empty(buffer_size, dtype=torch.long)
         while True:
             # record the generator states before sampling
             self.rng_state = g.get_state()
             indices = torch.randint(low, high, (buffer_size,), out=indices, generator=g)
-            for i in indices[self.rand_id:].tolist():
+            for i in indices[self.rand_id :].tolist():
                 self.rand_id += 1
                 yield i
             self.rand_id = 0
@@ -141,23 +150,27 @@ class BufferShuffledIterableDataset(IterableDataset):
 
     def state_dict(self):
         return {
-            'states': self.states,
-            'buffer': self.buffer.clone(),
-            'tokens': deepcopy(self.tokens),
-            'rand_id': self.rand_id,
-            'token_id': self.token_id,
-            'rng_state': self.rng_state,
-            'epoch': self._epoch
+            "states": self.states,
+            "buffer": self.buffer.clone(),
+            "tokens": deepcopy(self.tokens),
+            "rand_id": self.rand_id,
+            "token_id": self.token_id,
+            "rng_state": self.rng_state,
+            "epoch": self._epoch,
         }
 
     def load_state_dict(self, state_dict):
-        self.states = state_dict['states']
-        self.buffer = state_dict['buffer'].clone()
-        self.tokens = deepcopy(state_dict['tokens'])
-        self.rand_id = state_dict['rand_id']
-        self.token_id = state_dict['token_id']
-        self.rng_state = state_dict['rng_state'].clone() if state_dict['rng_state'] is not None else None
-        self._epoch = state_dict['epoch']
+        self.states = state_dict["states"]
+        self.buffer = state_dict["buffer"].clone()
+        self.tokens = deepcopy(state_dict["tokens"])
+        self.rand_id = state_dict["rand_id"]
+        self.token_id = state_dict["token_id"]
+        self.rng_state = (
+            state_dict["rng_state"].clone()
+            if state_dict["rng_state"] is not None
+            else None
+        )
+        self._epoch = state_dict["epoch"]
 
 
 class OnlineTokenizedIterableDataset(IterableDataset):
@@ -168,7 +181,7 @@ class OnlineTokenizedIterableDataset(IterableDataset):
         tokenizer: PreTrainedTokenizer,
         seq_len: int = 2048,
         rank: int = 0,
-        world_size: int = 1
+        world_size: int = 1,
     ) -> OnlineTokenizedIterableDataset:
 
         self.dataset = dataset
@@ -192,70 +205,84 @@ class OnlineTokenizedIterableDataset(IterableDataset):
                 self.tokens += sample
 
                 while len(self.tokens) >= self.seq_len:
-                    input_ids = torch.tensor(self.tokens[:self.seq_len], dtype=torch.long)
-                    self.tokens = self.tokens[self.seq_len:]
-                    yield {'input_ids': input_ids}
+                    input_ids = torch.tensor(
+                        self.tokens[: self.seq_len], dtype=torch.long
+                    )
+                    self.tokens = self.tokens[self.seq_len :]
+                    yield {"input_ids": input_ids}
 
     def tokenize(self, data, buffer_size: int = 64):
         buffer, states = [], []
         for sample in data:
-            if sample.get('text', None) is not None:
-                buffer.append(sample['text'])
-            elif sample.get('content', None) is not None:
-                buffer.append(sample['content'])
+            if sample.get("text", None) is not None:
+                buffer.append(sample["text"])
+            elif sample.get("content", None) is not None:
+                buffer.append(sample["content"])
             else:
-                raise ValueError(f"No 'text' or 'content' field found in sample:\n{sample}")
+                raise ValueError(
+                    f"No 'text' or 'content' field found in sample:\n{sample}"
+                )
             states.append(self.data.state_dict())
             if len(buffer) == buffer_size:
-                for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
+                for s, tokenized in zip(
+                    states,
+                    self.tokenizer(buffer, return_attention_mask=False)["input_ids"],
+                ):
                     self.states = s
                     yield tokenized
                 buffer, states = [], []
         if len(buffer) > 0:
-            for s, tokenized in zip(states, self.tokenizer(buffer, return_attention_mask=False)['input_ids']):
+            for s, tokenized in zip(
+                states, self.tokenizer(buffer, return_attention_mask=False)["input_ids"]
+            ):
                 self.states = s
                 yield tokenized
 
     def state_dict(self):
-        return {
-            'states': self.states,
-            'tokens': deepcopy(self.tokens)
-        }
+        return {"states": self.states, "tokens": deepcopy(self.tokens)}
 
     def load_state_dict(self, state_dict):
-        self.states = state_dict['states']
-        self.tokens = deepcopy(state_dict['tokens'])
+        self.states = state_dict["states"]
+        self.tokens = deepcopy(state_dict["tokens"])
 
 
-class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExamplesIterable):
+class BufferShuffledExamplesIterable(
+    datasets.iterable_dataset.BufferShuffledExamplesIterable
+):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def _init_state_dict(self) -> dict:
         self._state_dict = self.ex_iterable._init_state_dict()
-        self._state_dict['mem_buffer'] = ([],)
-        self._state_dict['bit_generator_state'] = self.generator.bit_generator.state
-        self._state_dict['bit_generator_index_offset'] = 0
-        self._state_dict['bit_generator_index_offset_shuffle'] = 0
+        self._state_dict["mem_buffer"] = ([],)
+        self._state_dict["bit_generator_state"] = self.generator.bit_generator.state
+        self._state_dict["bit_generator_index_offset"] = 0
+        self._state_dict["bit_generator_index_offset_shuffle"] = 0
         return self._state_dict
 
     def __iter__(self):
         buffer_size = self.buffer_size
         rng = deepcopy(self.generator)
         # this is the shuffle buffer that we keep in memory
-        mem_buffer = self._state_dict['mem_buffer'][0]
+        mem_buffer = self._state_dict["mem_buffer"][0]
         # this is an infinite iterator that randomly samples the index of the source to pick examples from
-        index_offset = self._state_dict["bit_generator_index_offset"] if self._state_dict else 0
+        index_offset = (
+            self._state_dict["bit_generator_index_offset"] if self._state_dict else 0
+        )
         if self._state_dict:
             rng.bit_generator.state = self._state_dict["bit_generator_state"]
-        indices_iterator = self._iter_random_indices(rng, buffer_size, random_batch_size=buffer_size)
+        indices_iterator = self._iter_random_indices(
+            rng, buffer_size, random_batch_size=buffer_size
+        )
         # skip already consumed ones
         for _ in range(index_offset):
             i = next(indices_iterator)
 
         for x in self.ex_iterable:
-            if len(mem_buffer) < buffer_size:  # if the buffer is not full, keep filling the buffer
+            if (
+                len(mem_buffer) < buffer_size
+            ):  # if the buffer is not full, keep filling the buffer
                 mem_buffer.append(x)
             else:  # otherwise, pick an example from it
                 i = next(indices_iterator)
@@ -263,12 +290,18 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
                 if self._state_dict:
                     self._state_dict["bit_generator_index_offset"] = index_offset
                     if index_offset == 0:
-                        self._state_dict["bit_generator_state"] = rng.bit_generator.state
+                        self._state_dict["bit_generator_state"] = (
+                            rng.bit_generator.state
+                        )
                 selected = mem_buffer[i]
                 mem_buffer[i] = x  # replace the picked example by a new one
                 yield selected
 
-        index_offset = self._state_dict["bit_generator_index_offset_shuffle"] if self._state_dict else 0
+        index_offset = (
+            self._state_dict["bit_generator_index_offset_shuffle"]
+            if self._state_dict
+            else 0
+        )
         if self._state_dict:
             rng.bit_generator.state = self._state_dict["bit_generator_state"]
 
@@ -279,16 +312,24 @@ class BufferShuffledExamplesIterable(datasets.iterable_dataset.BufferShuffledExa
                 self._state_dict["bit_generator_index_offset_shuffle"] = index_offset
             yield mem_buffer[i]
 
-    def shuffle_data_sources(self, generator: np.random.Generator) -> BufferShuffledExamplesIterable:
+    def shuffle_data_sources(
+        self, generator: np.random.Generator
+    ) -> BufferShuffledExamplesIterable:
         """Shuffle the wrapped examples iterable as well as the shuffling buffer."""
         return BufferShuffledExamplesIterable(
-            self.ex_iterable.shuffle_data_sources(generator), buffer_size=self.buffer_size, generator=generator
+            self.ex_iterable.shuffle_data_sources(generator),
+            buffer_size=self.buffer_size,
+            generator=generator,
         )
 
-    def shard_data_sources(self, num_shards: int, index: int, contiguous=True) -> BufferShuffledExamplesIterable:
+    def shard_data_sources(
+        self, num_shards: int, index: int, contiguous=True
+    ) -> BufferShuffledExamplesIterable:
         """Keep only the requested shard."""
         return BufferShuffledExamplesIterable(
-            self.ex_iterable.shard_data_sources(num_shards, index, contiguous=contiguous),
+            self.ex_iterable.shard_data_sources(
+                num_shards, index, contiguous=contiguous
+            ),
             buffer_size=self.buffer_size,
             generator=self.generator,
         )
@@ -314,7 +355,9 @@ def shuffle(
     generator: np.random.Generator = None,
     buffer_size: int = 1024,
 ):
-    generator = np.random.default_rng(seed) if generator is None else deepcopy(generator)
+    generator = (
+        np.random.default_rng(seed) if generator is None else deepcopy(generator)
+    )
     return IterableDataset(
         ex_iterable=BufferShuffledExamplesIterable(
             dataset._ex_iterable, buffer_size=buffer_size, generator=generator
@@ -324,7 +367,7 @@ def shuffle(
         formatting=dataset._formatting,
         shuffling=ShufflingConfig(generator=generator, _original_seed=seed),
         distributed=copy.deepcopy(dataset._distributed),
-        token_per_repo_id=dataset._token_per_repo_id
+        token_per_repo_id=dataset._token_per_repo_id,
     )
 
 
@@ -359,15 +402,14 @@ class DataCollatorForLanguageModeling:
     varlen: bool = False
 
     def __call__(
-        self,
-        examples: List[Union[List[int], Dict[str, Any]]]
+        self, examples: List[Union[List[int], Dict[str, Any]]]
     ) -> Dict[str, Any]:
         if not isinstance(examples[0], Dict):
-            examples = [{'input_ids': example} for example in examples]
+            examples = [{"input_ids": example} for example in examples]
 
         def tensorize(example: Dict[str, Any]) -> Dict[str, Any]:
             tensorized = {}
-            for key in ['input_ids', 'cu_seqlens']:
+            for key in ["input_ids", "cu_seqlens"]:
                 if key not in example:
                     continue
                 if isinstance(example[key], List):
@@ -381,11 +423,15 @@ class DataCollatorForLanguageModeling:
         examples = list(map(tensorize, examples))
 
         if not self.varlen:
-            length_of_first = examples[0]['input_ids'].size(0)
+            length_of_first = examples[0]["input_ids"].size(0)
             # Check if padding is necessary.
-            if all(example['input_ids'].size(0) == length_of_first for example in examples):
+            if all(
+                example["input_ids"].size(0) == length_of_first for example in examples
+            ):
                 batch = {
-                    'input_ids': torch.stack([example['input_ids'] for example in examples], dim=0),
+                    "input_ids": torch.stack(
+                        [example["input_ids"] for example in examples], dim=0
+                    ),
                 }
             else:
                 # If yes, check if we have a `pad_token`.
@@ -394,41 +440,64 @@ class DataCollatorForLanguageModeling:
                         f"You are attempting to pad samples but the tokenizer you are using "
                         f"({self.tokenizer.__class__.__name__}) does not have a pad token."
                     )
-                batch = self.tokenizer.pad(examples, return_tensors='pt', return_attention_mask=False)
+                batch = self.tokenizer.pad(
+                    examples, return_tensors="pt", return_attention_mask=False
+                )
         else:
             if len(examples) > 1:
-                raise ValueError("The batch size must be 1 for inputs with variable lengths.")
+                raise ValueError(
+                    "The batch size must be 1 for inputs with variable lengths."
+                )
             batch = {
-                'input_ids': torch.cat([example['input_ids'] for example in examples], dim=0).unsqueeze(0)
+                "input_ids": torch.cat(
+                    [example["input_ids"] for example in examples], dim=0
+                ).unsqueeze(0)
             }
-            if 'cu_seqlens' in examples[0]:
-                batch['cu_seqlens'] = torch.cat([example['cu_seqlens'] for example in examples], dim=0).unsqueeze(0)
+            if "cu_seqlens" in examples[0]:
+                batch["cu_seqlens"] = torch.cat(
+                    [example["cu_seqlens"] for example in examples], dim=0
+                ).unsqueeze(0)
             else:
                 # determine boundaries by bos/eos positions
                 if self.tokenizer.add_bos_token:
                     cu_seqlens = []
-                    if batch['input_ids'][0, 0] != self.tokenizer.bos_token_id:
+                    if batch["input_ids"][0, 0] != self.tokenizer.bos_token_id:
                         cu_seqlens.append(torch.tensor([0]))
-                    cu_seqlens.append(torch.where(batch['input_ids'].eq(self.tokenizer.bos_token_id))[1])
-                    cu_seqlens.append(torch.tensor([len(batch['input_ids'][0])]))
-                    batch['cu_seqlens'] = torch.cat(cu_seqlens, dim=0).to(dtype=torch.int32)
+                    cu_seqlens.append(
+                        torch.where(batch["input_ids"].eq(self.tokenizer.bos_token_id))[
+                            1
+                        ]
+                    )
+                    cu_seqlens.append(torch.tensor([len(batch["input_ids"][0])]))
+                    batch["cu_seqlens"] = torch.cat(cu_seqlens, dim=0).to(
+                        dtype=torch.int32
+                    )
                 elif self.tokenizer.add_eos_token:
                     cu_seqlens = [torch.tensor([0])]
-                    cu_seqlens.append(torch.where(batch['input_ids'].eq(self.tokenizer.eos_token_id))[1] + 1)
-                    if batch['input_ids'][0, -1] != self.tokenizer.eos_token_id:
-                        cu_seqlens.append(torch.tensor([len(batch['input_ids'][0])]))
-                    batch['cu_seqlens'] = torch.cat(cu_seqlens, dim=0).to(dtype=torch.int32)
+                    cu_seqlens.append(
+                        torch.where(batch["input_ids"].eq(self.tokenizer.eos_token_id))[
+                            1
+                        ]
+                        + 1
+                    )
+                    if batch["input_ids"][0, -1] != self.tokenizer.eos_token_id:
+                        cu_seqlens.append(torch.tensor([len(batch["input_ids"][0])]))
+                    batch["cu_seqlens"] = torch.cat(cu_seqlens, dim=0).to(
+                        dtype=torch.int32
+                    )
                 else:
-                    raise ValueError("You must allow the tokenizer to add either a bos or eos token as separators.")
+                    raise ValueError(
+                        "You must allow the tokenizer to add either a bos or eos token as separators."
+                    )
             if self.context_len is not None:
-                bos = batch['cu_seqlens'][:-1].tolist()
-                eos = batch['cu_seqlens'][1:].tolist()
-                batch['cu_seqlens'] = torch.cat(
-                    [torch.arange(i, j, self.context_len) for i, j in zip(bos, eos)] +
-                    [torch.tensor([len(batch['input_ids'][0])])]
+                bos = batch["cu_seqlens"][:-1].tolist()
+                eos = batch["cu_seqlens"][1:].tolist()
+                batch["cu_seqlens"] = torch.cat(
+                    [torch.arange(i, j, self.context_len) for i, j in zip(bos, eos)]
+                    + [torch.tensor([len(batch["input_ids"][0])])]
                 ).to(dtype=torch.int32)
 
-        labels = batch['input_ids'].clone()
+        labels = batch["input_ids"].clone()
         if self.tokenizer.pad_token_id is not None:
             labels[labels == self.tokenizer.pad_token_id] = -100
         batch["labels"] = labels
@@ -450,7 +519,7 @@ class ParallelAwareDataLoader(StatefulDataLoader, Stateful):
         pin_memory: bool = False,
         prefetch_factor: int = 2,
         persistent_workers: bool = False,
-        snapshot_every_n_steps: Optional[int] = 1
+        snapshot_every_n_steps: Optional[int] = 1,
     ):
         super().__init__(
             dataset=dataset,
@@ -460,7 +529,7 @@ class ParallelAwareDataLoader(StatefulDataLoader, Stateful):
             pin_memory=pin_memory,
             prefetch_factor=prefetch_factor,
             persistent_workers=persistent_workers,
-            snapshot_every_n_steps=snapshot_every_n_steps
+            snapshot_every_n_steps=snapshot_every_n_steps,
         )
         self.rank = rank
 
@@ -494,22 +563,24 @@ def build_dataloader(
     num_workers: int = 0,
     pin_memory: bool = False,
     persistent_workers: bool = False,
-    snapshot_every_n_steps: Optional[int] = 1
+    snapshot_every_n_steps: Optional[int] = 1,
 ):
     dataset = OnlineTokenizedIterableDataset(
         dataset=dataset,
         tokenizer=tokenizer,
         seq_len=seq_len,
         rank=rank,
-        world_size=world_size
+        world_size=world_size,
     )
     return ParallelAwareDataLoader(
         rank=rank,
         dataset=dataset,
         batch_size=batch_size,
-        collate_fn=DataCollatorForLanguageModeling(tokenizer=tokenizer, context_len=context_len, varlen=varlen),
+        collate_fn=DataCollatorForLanguageModeling(
+            tokenizer=tokenizer, context_len=context_len, varlen=varlen
+        ),
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=persistent_workers,
-        snapshot_every_n_steps=snapshot_every_n_steps
+        snapshot_every_n_steps=snapshot_every_n_steps,
     )
