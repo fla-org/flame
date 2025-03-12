@@ -382,20 +382,20 @@ def apply_compile(model: nn.Module):
             blocks.register_module(layer_id, block)
         logger.info("Compiling each block with torch.compile")
 
-    real_model = get_actual_model(model)
+    real_model = get_model(model)
 
     logger.info("Compiling the embedding, norm, and lm_head layers with torch.compile")
-    embeddings_key = get_real_components_name(real_model, "tok_embeddings")
+    embeddings_key = get_components_name(real_model, "tok_embeddings")
     if embeddings_key is not None:
         embeddings = torch.compile(getattr(real_model, embeddings_key), fullgraph=True)
         real_model.register_module(embeddings_key, embeddings)
 
-    norm_key = get_real_components_name(real_model, "norm")
+    norm_key = get_components_name(real_model, "norm")
     if norm_key is not None:
         norm = torch.compile(getattr(real_model, norm_key), fullgraph=True)
         real_model.register_module(norm_key, norm)
 
-    lm_head_key = get_real_components_name(model, "lm_head")
+    lm_head_key = get_components_name(model, "lm_head")
     if lm_head_key is not None:
         lm_head = torch.compile(getattr(model, lm_head_key), fullgraph=True)
         model.register_module(lm_head_key, lm_head)
@@ -487,7 +487,7 @@ def apply_ddp(
     logger.info("Applied DDP to the model")
 
 
-def get_actual_model(model):
+def get_model(model):
     base_model_prefix = getattr(model, "base_model_prefix", "model")
     if not hasattr(model, base_model_prefix):
         return None
@@ -497,14 +497,14 @@ def get_actual_model(model):
 
 def get_blocks(model):
     # TODO[flame]: adapt for network not using 'layers' attribute
-    model = get_actual_model(model)
+    model = get_model(model)
     if not hasattr(model, "layers"):
         logger.warning('no "layers" in model can be found')
         return None
     return model.layers
 
 
-def get_real_components_name(model, component_name):
+def get_components_name(model, component_name):
     """
     We try to catch tok_embeddings, norm layers and lm_head layers
     We do not catch the layer names in the blocks, for blocks see `get_blocks`
@@ -516,7 +516,7 @@ def get_real_components_name(model, component_name):
             norm,
         lm_head
     ***
-    so, to search 'tok_embeddings' and 'norm' we need to pass `get_actual_model(model)`
+    so, to search 'tok_embeddings' and 'norm' we need to pass `get_model(model)`
     and for 'lm_head' we need to pass `model`
     ***
     """

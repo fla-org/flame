@@ -18,8 +18,8 @@ from torch.distributed.pipelining.schedules import (ScheduleZBVZeroBubble,
                                                     get_schedule_class)
 from transformers import PretrainedConfig
 
-from flame.models.parallelize_fla import (get_actual_model, get_blocks,
-                                          get_real_components_name)
+from flame.models.parallelize_fla import (get_blocks, get_components_name,
+                                          get_model)
 from torchtitan.config_manager import JobConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
 from torchtitan.distributed.pipeline import (build_pipeline_schedule,
@@ -93,8 +93,8 @@ def pipeline_fla_manual_split(
         model = copy.deepcopy(whole_model)
         if not is_first:
             # we do `model.tok_embeddings = None` here
-            real_model = get_actual_model(model)
-            tok_embeddings_name = get_real_components_name(real_model, "tok_embeddings")
+            real_model = get_model(model)
+            tok_embeddings_name = get_components_name(real_model, "tok_embeddings")
             setattr(real_model, tok_embeddings_name, None)
 
         drop_layers = start_layer is not None
@@ -121,11 +121,11 @@ def pipeline_fla_manual_split(
 
         if not is_last:
             # we do `model.norm = None` and `model.output = None`
-            real_model = get_actual_model(model)
-            norm_name = get_real_components_name(real_model, "norm")
+            real_model = get_model(model)
+            norm_name = get_components_name(real_model, "norm")
             setattr(real_model, norm_name, None)
 
-            head_name = get_real_components_name(model, "lm_head")
+            head_name = get_components_name(model, "lm_head")
             setattr(model, head_name, None)
 
         stage = PipelineStage(
