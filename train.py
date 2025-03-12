@@ -21,6 +21,7 @@ from flame.components.checkpoint import TrainState
 from flame.components.optimizer import build_lr_schedulers
 from flame.config_manager import JobConfig
 from flame.data import build_dataloader, shuffle
+from flame.models.activation_offloading import get_act_offloading_ctx_manager
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
 from flame.tools.utils import get_num_flop_per_token
@@ -520,6 +521,11 @@ def main(job_config: JobConfig):
         job_config.experimental.enable_compiled_autograd,
     )
 
+    activation_offload_context = get_act_offloading_ctx_manager(
+        model,
+        job_config.activation_offload.mode == "full",
+    )
+
     # variables used to keep info for metrics logging
     ntokens_since_last_log = 0
     data_loading_times = []
@@ -652,9 +658,7 @@ def main(job_config: JobConfig):
                     )
                 else:
                     # Non-PP forward / backward
-                    with train_context(
-                        optional_context_parallel_ctx
-                    ):
+                    with train_context(optional_context_parallel_ctx):
                         output = model(
                             input_ids=input_ids,
                             labels=labels,

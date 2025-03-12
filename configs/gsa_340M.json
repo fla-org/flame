@@ -20,7 +20,7 @@
     "num_slots": 64,
     "norm_eps": 1e-06,
     "share_conv_kernel": true,
-    "tie_word_embeddings": true,
+    "tie_word_embeddings": false,
     "use_cache": true,
     "use_norm": true,
     "use_output_gate": true,

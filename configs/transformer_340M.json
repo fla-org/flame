@@ -12,7 +12,7 @@
     "num_heads": 16,
     "num_hidden_layers": 24,
     "norm_eps": 1e-06,
-    "tie_word_embeddings": true,
+    "tie_word_embeddings": false,
     "use_cache": true,
     "vocab_size": 32000
 }

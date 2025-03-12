@@ -18,7 +18,7 @@
     "num_hidden_layers": 24,
     "qk_activation": "silu",
     "qk_norm": "l2",
-    "tie_word_embeddings": true,
+    "tie_word_embeddings": false,
     "use_beta": true,
     "use_cache": true,
     "use_gate": false,

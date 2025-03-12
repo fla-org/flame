@@ -4,7 +4,7 @@
 
 </div>
  
-Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models with blazing efficiency. 
+Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for training Flash Linear Attention (FLA) models (and more broadly, arbitrary autoregressive language models) with blazing efficiency. 
 
 **Feature Highlights:**
 
@@ -30,26 +30,25 @@ git submodule update --init --recursive
 ```
 
 ## Dataset Preparation
+To download the dataset to your local disk, create a new Python file with the following content and execute it:
 
-`flame` streamlines dataset handling with smart on-the-fly processing. 
-
-For most datasets:
 ```py
 from datasets import load_dataset
 
-# Load fineweb-edu with parallel processing
-dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="default", num_proc=64)
-```
+# load fineweb-edu with parallel processing
+dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="default", num_proc=64, cache_dir="/your/cache/path")
 
-For SlimPajama-627B (used in [GLA paper](https://proceedings.mlr.press/v235/yang24ab.html)):
-```bash
-git lfs install
-git clone https://huggingface.co/datasets/cerebras/SlimPajama-627B --depth 1
+# or load a subset with roughly 100B tokens, suitable for small- or medium-sized experiments
+dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT", num_proc=64, cache_dir="/your/cache/path")
 ```
 
 ## Training Recipes
 
-Here's an example of how to train a 340M FLA transformer model with Llama-like architecture from scratch:
+Here's an example of training a 340M FLA Transformer model with a LLaMA-like architecture from scratch on a 100BT subset of the Fineweb-edu corpus in streaming mode.
+
+> [!WARNING]
+> If the dataset is not downloaded beforehand, the streaming mode will attempt to fetch it from a remote server and download it on-the-fly, which can be highly unstable during training due to network issues.  
+> For stable training, ensure the dataset is downloaded locally (see [**Dataset Preparation**](#dataset-preparation)). Otherwise, we assume you are only testing the new corpus.
 
 ```sh
 bash train.sh \
@@ -69,7 +68,7 @@ bash train.sh \
   --training.max_norm 1.0 \
   --training.skip_nan_inf \
   --training.dataset HuggingFaceFW/fineweb-edu \
-  --training.dataset_name default \
+  --training.dataset_name sample-100BT \
   --training.dataset_split train \
   --training.streaming \
   --training.num_workers 32 \
@@ -77,8 +76,12 @@ bash train.sh \
   --training.seed 42 \
   --checkpoint.interval 2048 \
   --checkpoint.load_step -1 \
+  --checkpoint.keep_latest_k 2 \
   --metrics.log_freq 4
 ```
+
+You can specify the number of GPUs by setting the environment variable `NGPU`, which defaults to 8.  
+**For single-GPU debugging, set `NGPU=1`.**
 
 We provide several [config files](https://github.com/fla-org/flame/tree/main/configs) for different models. 
 By default, the learning rate is set to 3e-4 with a cosine scheduler. Other schedulers, such as WSD (wsd), are also supported.
