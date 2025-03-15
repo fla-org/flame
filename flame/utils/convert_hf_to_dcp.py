@@ -9,7 +9,7 @@ import torch.distributed.checkpoint as DCP
 from transformers import AutoModelForCausalLM
 
 import fla  # noqa
-from torchtitan.logging import init_logger, logger
+from torchtitan.tools.logging import init_logger, logger
 
 
 @torch.inference_mode()
