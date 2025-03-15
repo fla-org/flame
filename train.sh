@@ -27,7 +27,7 @@ bash train.sh -h
 Training a 340M model:
 
 NNODE=1 NGPU=8 LOG_RANK=0 bash train.sh \
-  --job.config_file train.toml \
+  --job.config_file flame/models/fla.toml \
   --job.dump_folder exp/transformer-340M-10B/batch32.seqlen2048.warmup1024.update1.steps20480.lr3e-4 \
   --model.config configs/transformer_340M.json \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \

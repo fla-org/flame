@@ -52,7 +52,7 @@ Here's an example of training a 340M FLA Transformer model with a LLaMA-like arc
 
 ```sh
 bash train.sh \
-  --job.config_file train.toml \
+  --job.config_file flame/models/fla.toml \
   --job.dump_folder exp/transformer-340M-4K-10B/batch1.seqlen65536.context4096.warmup1024.update1.steps20480.lr3e-4.cosine \
   --model.config configs/transformer_340M.json \
   --model.tokenizer_path fla-hub/transformer-1.3B-100B \
