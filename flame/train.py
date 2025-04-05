@@ -580,9 +580,7 @@ def main(job_config: JobConfig):
                 input_ids, labels = batch["input_ids"], batch["labels"]
 
                 # Update metrics processor state before forward/backward
-                metric_logger.ntokens_since_last_log += (
-                    labels.numel() * job_config.training.gradient_accumulation_steps
-                )
+                metric_logger.ntokens_since_last_log += labels.numel()
                 metric_logger.data_loading_times.append(
                     time.perf_counter() - data_load_start
                 )
@@ -661,10 +659,7 @@ def main(job_config: JobConfig):
                             position_ids=position_ids,
                             cu_seqlens=cu_seqlens,
                         )
-                        loss = (
-                            output.loss
-                            / job_config.training.gradient_accumulation_steps
-                        )
+                        loss = output.loss
                         loss.backward()
 
                 losses.append(loss)
@@ -703,19 +698,17 @@ def main(job_config: JobConfig):
                     # Use dist_mean/max on the accumulated loss for the step
                     global_avg_loss, global_max_loss = (
                         dist_utils.dist_mean(
-                            loss * job_config.training.gradient_accumulation_steps,
+                            loss,
                             world_mesh["dp_cp"],
                         ),
                         dist_utils.dist_max(
-                            loss * job_config.training.gradient_accumulation_steps,
+                            loss,
                             world_mesh["dp_cp"],
                         ),
                     )
                 else:
                     # Scale back the loss before logging
-                    global_avg_loss = global_max_loss = (
-                        loss.item() * job_config.training.gradient_accumulation_steps
-                    )
+                    global_avg_loss = global_max_loss = loss.item()
 
                 # Update train state tokens and elapsed time
                 time_now = time.perf_counter()
