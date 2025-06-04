@@ -15,7 +15,7 @@ def get_nparams_and_flops(model: nn.Module, model_config, seq_len: int) -> tuple
         for m in model.children()
         if isinstance(m, nn.Embedding)
     )
-    
+
     if hasattr(model_config, "num_heads"):
         num_heads = model_config.num_heads
     elif hasattr(model_config, "num_attention_heads"):

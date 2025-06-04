@@ -11,6 +11,9 @@ from collections import defaultdict
 
 import torch
 import torch.nn as nn
+from fla.modules.fused_linear_cross_entropy import LinearLossParallel
+from fla.modules.mlp import SwiGLULinearParallel
+from fla.modules.parallel import PrepareModuleWeight
 from torch.distributed import DeviceMesh
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, MixedPrecisionPolicy, fully_shard
 from torch.distributed._composable.replicate import replicate
@@ -24,10 +27,6 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
     parallelize_module
 )
-
-from fla.modules.fused_linear_cross_entropy import LinearLossParallel
-from fla.modules.mlp import SwiGLULinearParallel
-from fla.modules.parallel import PrepareModuleWeight
 from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
 from torchtitan.tools.logging import logger
