@@ -22,6 +22,7 @@ from flame.data import build_dataloader, build_dataset
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
 from flame.tools.utils import get_nparams_and_flops
+from flame.tools.l2wrap import L2Wrap
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.ft import FTParallelDims, init_ft_manager
 from torchtitan.components.loss import build_cross_entropy_loss
@@ -493,6 +494,12 @@ def main(job_config: JobConfig):
                             output.loss
                             / job_config.training.gradient_accumulation_steps
                         )
+                        
+                        # Apply L2Wrap if enabled and logits are available
+                        if (job_config.training.enable_l2wrap and 
+                            hasattr(output, 'logits') and output.logits is not None):
+                            loss = L2Wrap.apply(loss, output.logits, job_config.training.l2wrap_factor)
+                        
                         loss.backward()
 
                 losses.append(loss)

@@ -443,6 +443,18 @@ class JobConfig:
             action="store_true",
             help="Use deterministic algorithms wherever possible, may be slower",
         )
+        # L2Wrap configs
+        self.parser.add_argument(
+            "--training.enable_l2wrap",
+            action="store_true",
+            help="Whether to enable L2Wrap regularization to encourage logits close to 0",
+        )
+        self.parser.add_argument(
+            "--training.l2wrap_factor",
+            type=float,
+            default=1e-4,
+            help="Factor coefficient for L2Wrap regularization, default is 1e-4",
+        )
         # metrics configs
         self.parser.add_argument(
             "--metrics.log_freq",
