@@ -7,13 +7,12 @@ import os
 import tempfile
 from datetime import timedelta
 
+import fla  # noqa
 import torch
 import torch.serialization
 from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-
-import fla  # noqa
 from torchtitan.tools.logging import init_logger, logger
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 
 @torch.inference_mode()

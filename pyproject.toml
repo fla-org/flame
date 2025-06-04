@@ -29,6 +29,9 @@ dependencies = [
     'tensorboard',
 ]
 
+[tool.setuptools.dynamic]
+version = {attr = "flame.__version__"}
+
 [project.optional-dependencies]
 dev = ["pytest"]
 
@@ -36,7 +39,8 @@ dev = ["pytest"]
 Homepage = "https://github.com/fla-org/flame"
 
 [build-system]
-requires = ["setuptools>=45", "wheel", "ninja", "torch"]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
 
 [tool.isort]
 line_length = 127

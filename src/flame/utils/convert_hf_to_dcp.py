@@ -4,12 +4,11 @@
 import argparse
 from pathlib import Path
 
+import fla  # noqa
 import torch
 import torch.distributed.checkpoint as DCP
-from transformers import AutoModelForCausalLM
-
-import fla  # noqa
 from torchtitan.tools.logging import init_logger, logger
+from transformers import AutoModelForCausalLM
 
 
 @torch.inference_mode()
