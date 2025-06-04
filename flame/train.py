@@ -205,6 +205,16 @@ def main(job_config: JobConfig):
                 f"{color.reset}"
             )
             model_config.fuse_cross_entropy = False
+    
+    # Disable fused cross entropy if L2Wrap is enabled
+    if job_config.training.enable_l2wrap and model_config.fuse_cross_entropy:
+        logger.warning(
+            f"{color.yellow}"
+            f"L2Wrap is enabled. Disabling fused cross entropy to access logits for regularization."
+            f"{color.reset}"
+        )
+        model_config.fuse_cross_entropy = False
+    
     model_config.vocab_size = max(tokenizer.vocab_size, model_config.vocab_size)
 
     logger.info(
