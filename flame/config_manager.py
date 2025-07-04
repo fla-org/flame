@@ -638,15 +638,22 @@ class JobConfig:
                 """
         )
         self.parser.add_argument(
-            "--checkpoint.initial_load_model_weights_only", type=bool, default=True,
+            "--checkpoint.initial_load_model_weights_only",
+            dest='checkpoint.initial_load_model_weights_only', action="store_true", default=True,
             help="""
                 This option specifies if only the model weights should be loaded during the initial
-                checkpoint load. The option is only used when `initial_load_path` is specified.
+                checkpoint load. The option is only used when `initial_load_path` is specified, and
+                only applies to a model_weights_only checkpoint. Loading a periodic checkpoint 
+                may lead to unexpected behavior if this option is set to True.
                 If False, the checkpoint at `initial_load_path` is treated as a standard training
                 checkpoint, including optimizer and training states.
                 The default setting for this option is True. Note that you will have to use
                 `--checkpoint.no_initial_load_model_weights_only` to override the default setting.
             """
+        )
+        self.parser.add_argument(
+            "--checkpoint.no_initial_load_model_weights_only",
+            dest='checkpoint.initial_load_model_weights_only', action="store_false",
         )
         self.parser.add_argument(
             "--checkpoint.interval",
