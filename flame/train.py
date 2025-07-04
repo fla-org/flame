@@ -9,19 +9,11 @@ import os
 import time
 from datetime import timedelta
 
-import torch
-from torch.distributed.elastic.multiprocessing.errors import record
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-
 import fla  # noqa
+import torch
 from fla.modules.fused_linear_cross_entropy import FusedLinearCrossEntropyLoss
 from fla.ops.utils import prepare_position_ids
-from flame.components.checkpoint import TrainState
-from flame.config_manager import JobConfig
-from flame.data import build_dataloader, build_dataset
-from flame.models.parallelize_fla import parallelize_fla
-from flame.models.pipeline_fla import pipeline_fla
-from flame.tools.utils import get_nparams_and_flops
+from torch.distributed.elastic.multiprocessing.errors import record
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.ft import FTParallelDims, init_ft_manager
 from torchtitan.components.loss import build_cross_entropy_loss
@@ -35,6 +27,15 @@ from torchtitan.protocols.train_spec import TrainSpec, get_train_spec, register_
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.tools.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
+import custom_models
+from flame.components.checkpoint import TrainState
+from flame.config_manager import JobConfig
+from flame.data import build_dataloader, build_dataset
+from flame.models.parallelize_fla import parallelize_fla
+from flame.models.pipeline_fla import pipeline_fla
+from flame.tools.utils import get_nparams_and_flops
 
 
 def build_tokenizer(job_config: JobConfig) -> AutoTokenizer:

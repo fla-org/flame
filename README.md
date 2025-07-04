@@ -474,6 +474,26 @@ To set up multi-node training:
 
 `torchtitan` provides a [Slurm script](https://github.com/pytorch/torchtitan/blob/main/multinode_trainer.slurm) for multi-node training, which you can use as a reference or starting point.
 
+## Custom models
+
+`flame` supports custom model architectures through seamless integration with the Hugging Face `transformers` library. To add your own model:
+
+1. Create a new model directory under `custom_models/` (see `custom_models/sba` for a complete example)
+2. Implement your model classes and configuration:
+   - Define a config class inheriting from `PretrainedConfig` (see `custom_models/sba/config_sba.py` for an example)
+   - Create model classes inheriting from `PreTrainedModel` (see `custom_models/sba/modeling_sba.py` for an example)
+3. Register your models in `__init__.py`:
+   - Import your model classes and config classes
+   - Register your models with the `AutoModelForCausalLM`, `AutoModel` and `AutoConfig` classes (see `custom_models/sba/__init__.py` for an example)
+4. Create a config file for your custom model, just need to specify the `model_type` to the one you just named for your custom model (example: `configs/sba_340m.json`).
+5. Training is extremely simple, you can just use the `flame.train.py` script to train your custom model.
+
+
+
+
+
+
+
 ## Citation
 
 If you find `flame` helpful for your work, please consider citing it.
