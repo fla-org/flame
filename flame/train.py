@@ -350,6 +350,11 @@ def main(job_config: JobConfig):
         parallel_dims.loss_parallel_enabled,
         job_config.experimental.enable_compiled_autograd,
     )
+    maybe_enable_amp = dist_utils.maybe_enable_amp(
+        parallel_dims,
+        job_config.training.mixed_precision_param,
+        device_type,
+    )
 
     # variables used to keep info for metrics logging
     device_memory_monitor.reset_peak_stats()
@@ -484,11 +489,12 @@ def main(job_config: JobConfig):
                 else:
                     # Non-PP forward / backward
                     with train_context(optional_context_parallel_ctx):
-                        output = model(
-                            input_ids=input_ids,
-                            labels=labels,
-                            position_ids=position_ids,
-                            cu_seqlens=cu_seqlens,
+                        with maybe_enable_amp:
+                            output = model(
+                                input_ids=input_ids,
+                                labels=labels,
+                                position_ids=position_ids,
+                                cu_seqlens=cu_seqlens,
                         )
                         loss = (
                             output.loss

@@ -184,6 +184,18 @@ class JobConfig:
             "--optimizer.lr", type=float, default=8e-4, help="Learning rate to use"
         )
         self.parser.add_argument(
+            "--optimizer.beta1", type=float, default=0.9,
+            help="Exponential moving average hyperparameters to use"
+        )
+        self.parser.add_argument(
+            "--optimizer.beta2", type=float, default=0.95,
+            help="Exponential moving average hyperparameters to use"
+        )
+        self.parser.add_argument(
+            "--optimizer.weight_decay", type=float, default=0.1,
+            help="Weight decay to use"
+        )
+        self.parser.add_argument(
             "--optimizer.implementation",
             type=str,
             default="fused",
@@ -407,8 +419,10 @@ class JobConfig:
             default="bfloat16",
             choices=["bfloat16", "float32"],
             help="""
-                torch dtype to use for parameters when applying mixed precision via FSDP.
-                This feature only takes effect when data_parallel_shard_degree > 1
+                torch dtype to use for parameters when applying mixed precision via fully_shard or torch.autocast.
+                This feature takes effect via fully_shard when data_parallel_shard_degree > 1 or
+                context_parallel_degree > 1; it takes effect via torch.autocast when data_replicate_degree >= 1
+                and no other parallelism is enabled, i.e. under DDP or single-device training.
             """,
         )
         self.parser.add_argument(
@@ -607,18 +621,53 @@ class JobConfig:
             """,
         )
         self.parser.add_argument(
+            "--checkpoint.initial_load_path", type=str, default=None,
+            help="""
+                This option specifies the path to the initial checkpoint to load, which is
+                particularly useful for resuming training from a previous run with a
+                different output path or when loading a checkpoint from a pre-trained model.
+                If the checkpoint folder for the current run is not empty,
+                located at {--job.dump_folder}/{--checkpoint.folder}, this option will be ignored.
+                This feature allows users to load an initial checkpoint from a different folder and
+                continue training, saving new checkpoints to the specified folder without affecting
+                the existing ones.
+            
+                Note that the path should contain the full path to the checkpoint folder,
+                including the step number, if any; for example,
+                "//pre_train/checkpoints/llama3/llama3_8b/step_10000".
+                """
+        )
+        self.parser.add_argument(
+            "--checkpoint.initial_load_model_weights_only",
+            dest='checkpoint.initial_load_model_weights_only', action="store_true", default=True,
+            help="""
+                This option specifies if only the model weights should be loaded during the initial
+                checkpoint load. The option is only used when `initial_load_path` is specified, and
+                only applies to a model_weights_only checkpoint. Loading a periodic checkpoint 
+                may lead to unexpected behavior if this option is set to True.
+                If False, the checkpoint at `initial_load_path` is treated as a standard training
+                checkpoint, including optimizer and training states.
+                The default setting for this option is True. Note that you will have to use
+                `--checkpoint.no_initial_load_model_weights_only` to override the default setting.
+            """
+        )
+        self.parser.add_argument(
+            "--checkpoint.no_initial_load_model_weights_only",
+            dest='checkpoint.initial_load_model_weights_only', action="store_false",
+        )
+        self.parser.add_argument(
             "--checkpoint.interval",
             type=int,
             default=500,
             help="Checkpointing interval in steps.",
         )
         self.parser.add_argument(
-            "--checkpoint.model_weights_only",
+            "--checkpoint.last_save_model_weights_only",
             action="store_true",
             help="""
-                When model_weights_only=True, only model weights will be saved at the end of training.
-                With this, checkpoints can be loaded using `torch.load(..., weights_only=True)` after conversion.
-                When model_weights_only=False, the full checkpoint will be saved.
+                When last_save_model_weights_only=True, only model weights will be saved at the end of training,
+                the last save.  With this, checkpoints can be loaded using `torch.load(..., weights_only=True)`
+                after conversion.  When last_save_model_weights_only=False, the full checkpoint will be saved.
                 A full checkpoint includes model, optimizer and train_state, which can be used to resume training.
                 The default value is false.
             """,

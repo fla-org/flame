@@ -30,7 +30,7 @@ pip uninstall flash-linear-attention && pip install -U --no-use-pep517 git+https
 
 [Important] Install specific version of torchtitan
 ```
-pip install git+https://github.com/pytorch/torchtitan.git@5e2033c
+pip install git+https://github.com/pytorch/torchtitan.git@0b44d4c
 ```
 
 
