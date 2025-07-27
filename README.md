@@ -487,6 +487,7 @@ To set up multi-node training:
    - Register your models with the `AutoModelForCausalLM`, `AutoModel` and `AutoConfig` classes (see `custom_models/sba/__init__.py` for an example)
 4. Create a config file for your custom model, just need to specify the `model_type` to the one you just named for your custom model (example: `configs/sba_340m.json`).
 5. Training is extremely simple, you can just use the `flame.train.py` script to train your custom model.
+6. Edit `custom_models/__init__.py` to import your custom model (e.g., `from . import sba`). Set `__all__` accordingly so only valid packages are exposed.
 
 
 
