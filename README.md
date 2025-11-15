@@ -2,11 +2,11 @@
 
 # 🔥 Flame: Flash Language Modeling Made Easy
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/fla-org/flame)
+
 </div>
 
 Welcome to 🔥 `flame`, a minimal and efficient framework built on `torchtitan` for language models with blazing efficiency.
-
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/fla-org/flame)
 
 **Feature Highlights:**
 
