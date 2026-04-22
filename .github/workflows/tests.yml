@@ -1,0 +1,38 @@
+name: tests
+
+on:
+  push:
+    branches: [ '*' ]
+  pull_request:
+    branches: [ '*' ]
+
+jobs:
+  data:
+    name: data (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        # CPU-only torch + the subset of runtime deps that `flame.data` actually
+        # touches. We skip flash-linear-attention / triton (need CUDA) and
+        # torchtitan (stubbed by tests/conftest.py). `datasets` is pinned to
+        # <4.0 because `flame.data` imports `ShufflingConfig` from
+        # `datasets.iterable_dataset`, which was removed in 4.x.
+        run: |
+          python -m pip install -U pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install torchdata 'datasets>=3.3.0,<4.0' 'transformers>=4.45.0' pytest
+
+      - name: Run data tests
+        run: python -m pytest tests/test_data.py -v --tb=short
