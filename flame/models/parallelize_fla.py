@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 # This file applies the PT-D parallelisms (except pipeline parallelism) and various
-# training techniques (e.g. activation checkpointing and compile) to the Llama model.
+# training techniques (e.g. activation checkpointing and compile) to the FLA models.
 
 from collections import defaultdict
 
@@ -28,24 +28,31 @@ from torch.distributed.tensor.parallel import (
 from fla.modules.fused_linear_cross_entropy import LinearLossParallel
 from fla.modules.mlp import SwiGLULinearParallel
 from fla.modules.parallel import PrepareModuleWeight
-from torchtitan.config_manager import TORCH_DTYPE_MAP, JobConfig
+from torchtitan.config import TORCH_DTYPE_MAP, JobConfig
 from torchtitan.distributed.parallel_dims import ParallelDims
 from torchtitan.tools.logging import logger
 
 
 def parallelize_fla(
     model: nn.Module,
-    world_mesh: DeviceMesh,
     parallel_dims: ParallelDims,
     job_config: JobConfig,
-):
+) -> nn.Module:
     """
     Apply tensor parallelism, activation checkpointing, torch.compile, and data
     parallelism to the model.
 
     NOTE: The passed-in model preferably should be on meta device. Otherwise,
     the model must fit on GPU or CPU memory.
+
+    The signature matches the new torchtitan protocol: takes ``parallel_dims``
+    (rather than a world mesh) and returns the (possibly wrapped) model.
     """
+
+    loss_parallel_enabled = (
+        parallel_dims.tp_enabled
+        and not job_config.training.disable_loss_parallel
+    )
 
     if parallel_dims.tp_enabled:
         if (
@@ -56,8 +63,8 @@ def parallelize_fla(
         enable_float8_linear = "float8" in job_config.model.converters
         apply_tp(
             model,
-            world_mesh["tp"],
-            loss_parallel=parallel_dims.loss_parallel_enabled,
+            parallel_dims.get_mesh("tp"),
+            loss_parallel=loss_parallel_enabled,
             enable_float8=enable_float8_linear,
             enable_async_tp=job_config.experimental.enable_async_tensor_parallel,
         )
@@ -69,17 +76,17 @@ def parallelize_fla(
     if job_config.training.compile:
         apply_compile(model)
 
-    if (
-        parallel_dims.dp_shard_enabled or parallel_dims.cp_enabled
-    ):  # apply FSDP or HSDP, potentially with Context Parallel
+    if parallel_dims.fsdp_enabled:
+        # apply FSDP or HSDP, potentially with Context Parallel
+        fsdp_mesh_dims: tuple[str, ...]
         if parallel_dims.dp_replicate_enabled:
-            dp_mesh_dim_names = ("dp_replicate", "dp_shard_cp")
+            fsdp_mesh_dims = ("dp_replicate", "fsdp")
         else:
-            dp_mesh_dim_names = ("dp_shard_cp",)
+            fsdp_mesh_dims = ("fsdp",)
 
         apply_fsdp(
             model,
-            world_mesh[tuple(dp_mesh_dim_names)],
+            parallel_dims.get_mesh(list(fsdp_mesh_dims)),
             param_dtype=TORCH_DTYPE_MAP[job_config.training.mixed_precision_param],
             reduce_dtype=TORCH_DTYPE_MAP[job_config.training.mixed_precision_reduce],
             pp_enabled=parallel_dims.pp_enabled,
@@ -98,14 +105,15 @@ def parallelize_fla(
         if job_config.training.enable_cpu_offload:
             logger.info("Applied CPU Offloading to the model")
     elif parallel_dims.dp_replicate_enabled:
-        if world_mesh.ndim > 1:
-            raise RuntimeError("DDP has not supported > 1D parallelism")
+        # pure DDP: need a 1-D dp_replicate mesh, no other parallelism dims.
         apply_ddp(
             model,
-            world_mesh,
+            parallel_dims.get_mesh("dp_replicate"),
             enable_compile=job_config.training.compile,
             enable_compiled_autograd=job_config.experimental.enable_compiled_autograd,
         )
+
+    return model
 
 
 class TPPlan:
@@ -122,7 +130,6 @@ class TPPlan:
 
         # TODO(vkuzo): once float8 configuration supports delayed scaling,
         # add a check here to enforce supported float8 all-gather configurations
-        # TODO(vkuzo): add the items below to __init__.py of torchao.float8 and import from there
         try:
             from torchao.float8.float8_tensor_parallel import (
                 Float8ColwiseParallel,
@@ -248,10 +255,6 @@ def apply_tp(
     enable_async_tp: bool,
 ):
     """Apply tensor parallelism."""
-    # 1. Parallelize the embedding and shard its outputs (which are the first
-    # transformer block's inputs)
-    # 2. Parallelize the root norm layer over the sequence dim
-    # 3. Parallelize the final linear output layer
     tp_plan = TP_PLAN_MAP[model.config.model_type](
         model, loss_parallel=loss_parallel, enable_float8=enable_float8
     )
@@ -495,7 +498,7 @@ def get_model(model):
 
 
 def get_blocks(model):
-    # TODO[flame]: adapt for network not using 'layers' attribute
+    # TODO[flame]: adapt for networks not using 'layers' attribute
     model = get_model(model)
     if not hasattr(model, "layers"):
         logger.warning('no "layers" in model can be found')

@@ -35,14 +35,14 @@ lr = 3e-4
 [lr_scheduler]
 warmup_steps = 1024
 decay_type = "cosine"
-lr_min = 0.1
+min_lr_factor = 0.1
 
 [checkpoint]
-enable_checkpoint = true
+enable = true
 folder = "checkpoint"
-interval_type = "steps"
 interval = 2048
-model_weights_only = false
+# Save the full checkpoint (not weights-only) so training can resume from here.
+last_save_model_only = false
 export_dtype = "float32"
 async_mode = "disabled"    # ["disabled", "async", "async_with_pinned_mem"]
 

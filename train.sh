@@ -35,7 +35,7 @@ NNODE=1 NGPU=8 LOG_RANK=0 bash train.sh \
   --optimizer.eps 1e-15 \
   --optimizer.lr 3e-4 \
   --lr_scheduler.warmup_steps 1024 \
-  --lr_scheduler.lr_min 0.1 \
+  --lr_scheduler.min_lr_factor 0.1 \
   --lr_scheduler.decay_type cosine \
   --training.batch_size 32 \
   --training.seq_len 2048 \
@@ -53,6 +53,7 @@ NNODE=1 NGPU=8 LOG_RANK=0 bash train.sh \
   --training.compile \
   --training.tensor_parallel_degree 1 \
   --training.disable_loss_parallel \
+  --checkpoint.enable \
   --checkpoint.interval 2048 \
   --checkpoint.load_step -1 \
   --metrics.log_freq 1
@@ -70,11 +71,12 @@ model=$(
 )
 
 mkdir -p $path
-cp * $path
+# Snapshot the repo into the run folder for reproducibility.
+# The older script also copied `3rdparty/flash-linear-attention` and `3rdparty/torchtitan`,
+# but those submodules were removed (see commit c4939ae — deps now come from pip).
+cp * $path 2>/dev/null || true
 cp -r configs $path
 cp -r flame   $path
-cp -r 3rdparty/flash-linear-attention/fla $path
-cp -r 3rdparty/torchtitan/torchtitan $path
 
 # for offline systems
 # export TRANSFORMERS_OFFLINE=1

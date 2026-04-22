@@ -251,14 +251,24 @@ class JobConfig:
             """,
         )
         self.parser.add_argument(
-            "--lr_scheduler.lr_min",
+            "--lr_scheduler.min_lr_factor",
             type=float,
             default=0.0,
             help="""
             Min lr ratio for lr scheduler.
 
-            If provided, the range of decay factor is scaled from 1 to `lr_min`
-            to ensure the learning rate does not drop below `optimizer.lr * lr_scheduler.lr_min`.
+            If provided, the range of decay factor is scaled from 1 to `min_lr_factor`
+            to ensure the learning rate does not drop below `optimizer.lr * lr_scheduler.min_lr_factor`.
+            """,
+        )
+        self.parser.add_argument(
+            "--lr_scheduler.total_steps",
+            type=int,
+            default=None,
+            help="""
+            Total steps for LR schedule calculation. If None, defaults to training.steps.
+            Lets the LR schedule be decoupled from the actual training steps, useful for
+            early stopping or debug-length runs that should follow the full-training curve.
             """,
         )
 
@@ -502,6 +512,23 @@ class JobConfig:
             action="store_true",
             help="Whether to apply async tensor parallel (currently only effective when compile is enabled)",
         )
+        # Torchtitan 0.2 moved most parallelism knobs into a dedicated `parallelism`
+        # section. We still expose them under --training.* and --experimental.* for
+        # backwards compatibility with existing scripts; `_validate_config` mirrors
+        # the values into a `parallelism` subconfig so torchtitan internals can read
+        # them under the new names (e.g. `job_config.parallelism.pipeline_parallel_schedule`).
+        self.parser.add_argument(
+            "--parallelism.pipeline_parallel_schedule",
+            type=str,
+            default=None,
+            help="[torchtitan 0.2] Pipeline parallel schedule. If unset, mirrors --experimental.pipeline_parallel_schedule.",
+        )
+        self.parser.add_argument(
+            "--parallelism.context_parallel_load_balancer",
+            type=str,
+            default="headtail",
+            help="Load balancer type for context parallelism (passed through to torchtitan 0.2).",
+        )
         self.parser.add_argument(
             "--experimental.pipeline_parallel_degree",
             type=int,
@@ -595,19 +622,18 @@ class JobConfig:
         # with TorchFT.
         # This option is subject to change and may be deleted in the future.
         self.parser.add_argument(
-            "--experimental.custom_model_path",
+            "--experimental.custom_import",
             type=str,
             default="",
             help="""
-                The --custom_model_path option allows to specify a custom path to a model module
-                that is not natively implemented within TorchTitan.
-                Acceptable values are the file system path to the module (e.g., my_models/model_x)
-                dotted import module  (e.g., some_package.model_x).
+                Import a custom model module by dotted import path (e.g. `some_package.model_x`).
+                Use this to register external model definitions that aren't natively implemented
+                within torchtitan / flame.
             """,
         )
         # checkpointing configs
         self.parser.add_argument(
-            "--checkpoint.enable_checkpoint",
+            "--checkpoint.enable",
             action="store_true",
             help="Whether to enable checkpoint",
         )
@@ -617,7 +643,7 @@ class JobConfig:
             default="checkpoint",
             help="""
                 The folder to store the checkpoints.
-                When enable_checkpoint is set to true, checkpoints will be in {--job.dump_folder}/{--checkpoint.folder}.
+                When enable is set to true, checkpoints will be in {--job.dump_folder}/{--checkpoint.folder}.
             """,
         )
         self.parser.add_argument(
@@ -631,29 +657,57 @@ class JobConfig:
                 This feature allows users to load an initial checkpoint from a different folder and
                 continue training, saving new checkpoints to the specified folder without affecting
                 the existing ones.
-            
+
                 Note that the path should contain the full path to the checkpoint folder,
                 including the step number, if any; for example,
                 "//pre_train/checkpoints/llama3/llama3_8b/step_10000".
                 """
         )
         self.parser.add_argument(
-            "--checkpoint.initial_load_model_weights_only",
-            dest='checkpoint.initial_load_model_weights_only', action="store_true", default=True,
+            "--checkpoint.initial_load_model_only",
+            dest='checkpoint.initial_load_model_only', action="store_true", default=True,
             help="""
-                This option specifies if only the model weights should be loaded during the initial
-                checkpoint load. The option is only used when `initial_load_path` is specified, and
-                only applies to a model_weights_only checkpoint. Loading a periodic checkpoint 
-                may lead to unexpected behavior if this option is set to True.
+                If True, only the model weights are loaded during the initial checkpoint load.
                 If False, the checkpoint at `initial_load_path` is treated as a standard training
-                checkpoint, including optimizer and training states.
-                The default setting for this option is True. Note that you will have to use
-                `--checkpoint.no_initial_load_model_weights_only` to override the default setting.
+                checkpoint, including optimizer and training states. Use
+                `--checkpoint.no_initial_load_model_only` to set to False.
             """
         )
         self.parser.add_argument(
-            "--checkpoint.no_initial_load_model_weights_only",
-            dest='checkpoint.initial_load_model_weights_only', action="store_false",
+            "--checkpoint.no_initial_load_model_only",
+            dest='checkpoint.initial_load_model_only', action="store_false",
+        )
+        self.parser.add_argument(
+            "--checkpoint.initial_load_in_hf",
+            action="store_true",
+            help="Load the initial checkpoint from HF safetensors format.",
+        )
+        self.parser.add_argument(
+            "--checkpoint.initial_load_in_hf_quantized",
+            action="store_true",
+            help="Load initial HF safetensors checkpoint with quantized keys (requires a HF storage reader).",
+        )
+        self.parser.add_argument(
+            "--checkpoint.enable_first_step_checkpoint",
+            action="store_true",
+            help="Save a checkpoint after step 1 (useful to validate checkpointing end-to-end).",
+        )
+        self.parser.add_argument(
+            "--checkpoint.enable_ft_dataloader_checkpoints",
+            dest="checkpoint.enable_ft_dataloader_checkpoints",
+            action="store_true",
+            default=True,
+            help="Snapshot dataloader index in checkpoints (needed for fault-tolerant training).",
+        )
+        self.parser.add_argument(
+            "--checkpoint.no_enable_ft_dataloader_checkpoints",
+            dest="checkpoint.enable_ft_dataloader_checkpoints",
+            action="store_false",
+        )
+        self.parser.add_argument(
+            "--checkpoint.load_only",
+            action="store_true",
+            help="Only load checkpoints; do not save new ones (useful for verification).",
         )
         self.parser.add_argument(
             "--checkpoint.interval",
@@ -662,15 +716,19 @@ class JobConfig:
             help="Checkpointing interval in steps.",
         )
         self.parser.add_argument(
-            "--checkpoint.last_save_model_weights_only",
+            "--checkpoint.last_save_model_only",
             action="store_true",
             help="""
-                When last_save_model_weights_only=True, only model weights will be saved at the end of training,
-                the last save.  With this, checkpoints can be loaded using `torch.load(..., weights_only=True)`
-                after conversion.  When last_save_model_weights_only=False, the full checkpoint will be saved.
-                A full checkpoint includes model, optimizer and train_state, which can be used to resume training.
-                The default value is false.
+                When True, only model weights are saved at the end of training (the last save).
+                With this, checkpoints can be loaded via `torch.load(..., weights_only=True)` after
+                conversion. When False, the full checkpoint is saved (model + optimizer + state),
+                which can be used to resume training. Default is False.
             """,
+        )
+        self.parser.add_argument(
+            "--checkpoint.last_save_in_hf",
+            action="store_true",
+            help="Save the last checkpoint as HF safetensors. Requires last_save_model_only=True.",
         )
         self.parser.add_argument(
             "--checkpoint.export_dtype",
@@ -820,6 +878,30 @@ class JobConfig:
             default=20000,
             help="Flight recorder ring buffer size, >0 means recording by default, 0 means disabled",
         )
+        self.parser.add_argument(
+            "--comm.save_traces_folder",
+            type=str,
+            default="comm_traces",
+            help="Flight recorder trace files location.",
+        )
+        self.parser.add_argument(
+            "--comm.save_traces_file_prefix",
+            type=str,
+            default="rank_",
+            help="Flight recorder trace files prefix.",
+        )
+        self.parser.add_argument(
+            "--comm.mode",
+            type=str,
+            default="default",
+            choices=["default", "fake_backend", "local_tensor"],
+            help="""
+            Communication mode for distributed training.
+            - "default": Normal distributed training with real communication.
+            - "fake_backend": Fake comm backend for dry run / config validation without GPU.
+            - "local_tensor": Simulate distributed training in a single process for debugging.
+            """,
+        )
 
         # memory estimation settings
         self.parser.add_argument(
@@ -923,6 +1005,42 @@ class JobConfig:
         # TODO: Add more mandatory validations
         assert self.model.config
         assert self.model.tokenizer_path
+
+        # Populate a `parallelism` subconfig mirroring the parallelism knobs that
+        # torchtitan >= 0.2 reads off `job_config.parallelism.*`. We keep flame's
+        # original --training.* / --experimental.* flags (they pre-date torchtitan's
+        # split) and just forward them here into the shape torchtitan expects.
+        parallelism_values = {
+            "pipeline_parallel_schedule": (
+                getattr(self.parallelism, "pipeline_parallel_schedule", None)
+                or getattr(self.experimental, "pipeline_parallel_schedule", "1F1B")
+            ),
+            "context_parallel_load_balancer": getattr(
+                self.parallelism, "context_parallel_load_balancer", "headtail"
+            ),
+            "pipeline_parallel_degree": getattr(self.experimental, "pipeline_parallel_degree", 1),
+            "pipeline_parallel_split_points": getattr(self.experimental, "pipeline_parallel_split_points", []),
+            "pipeline_parallel_microbatches": getattr(self.experimental, "pipeline_parallel_microbatches", None),
+            "pipeline_parallel_schedule_csv": getattr(self.experimental, "pipeline_parallel_schedule_csv", ""),
+            "context_parallel_degree": getattr(self.experimental, "context_parallel_degree", 1),
+            "context_parallel_rotate_method": getattr(self.experimental, "context_parallel_rotate_method", "allgather"),
+            "tensor_parallel_degree": getattr(self.training, "tensor_parallel_degree", 1),
+            "data_parallel_shard_degree": getattr(self.training, "data_parallel_shard_degree", -1),
+            "data_parallel_replicate_degree": getattr(self.training, "data_parallel_replicate_degree", 1),
+            "disable_loss_parallel": getattr(self.training, "disable_loss_parallel", False),
+            "enable_async_tensor_parallel": getattr(self.experimental, "enable_async_tensor_parallel", False),
+            "expert_parallel_degree": 1,
+            "expert_tensor_parallel_degree": 1,
+            "fsdp_reshard_after_forward": getattr(self.training, "fsdp_reshard_after_forward", "default"),
+        }
+        self.parallelism = type("Parallelism", (), parallelism_values)()
+
+        # Ensure `fault_tolerance.enable` / `replica_id` exist — torchtitan's
+        # metrics processor unconditionally reads them.
+        if not hasattr(self.fault_tolerance, "enable"):
+            self.fault_tolerance.enable = False
+        if not hasattr(self.fault_tolerance, "replica_id"):
+            self.fault_tolerance.replica_id = 0
 
     def _get_string_list_argument_names(self) -> list[str]:
         """Get the parser argument names of type `string_list`."""
