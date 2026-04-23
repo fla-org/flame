@@ -1,0 +1,20 @@
+{
+    "model_type": "rwkv7",
+    "hidden_size": 1024,
+    "num_hidden_layers": 24,
+    "head_dim": 64,
+    "hidden_ratio": 4,
+    "hidden_act": "sqrelu",
+    "vocab_size": 32000,
+    "decay_low_rank_dim": 64,
+    "gate_low_rank_dim": 128,
+    "a_low_rank_dim": 64,
+    "v_low_rank_dim": 16,
+    "tie_word_embeddings": false,
+    "fuse_cross_entropy": true,
+    "fuse_norm": true,
+    "use_l2warp": false,
+    "attn_mode": "chunk",
+    "bos_token_id": 1,
+    "eos_token_id": 2
+}
