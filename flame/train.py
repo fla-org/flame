@@ -409,7 +409,23 @@ def main(job_config: JobConfig):
 
             losses = []
             # do gradient accumulation if enabled
-            for _ in range(job_config.training.gradient_accumulation_steps):
+            for microbatch_index in range(
+                job_config.training.gradient_accumulation_steps
+            ):
+                if parallel_dims.dp_replicate_enabled:
+                    is_last_microbatch = (
+                        microbatch_index
+                        == job_config.training.gradient_accumulation_steps - 1
+                    )
+                    for model_part in model_parts:
+                        if (
+                            parallel_dims.dp_shard_enabled
+                            or parallel_dims.cp_enabled
+                        ):
+                            model_part.set_requires_all_reduce(is_last_microbatch)
+                        else:
+                            model_part.set_requires_gradient_sync(is_last_microbatch)
+
                 # get batch
                 data_load_start = time.perf_counter()
                 batch = next(data_iterator)
