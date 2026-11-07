@@ -19,7 +19,6 @@ from torchtitan.components.ft import FTParallelDims, init_ft_manager
 from torchtitan.components.loss import build_cross_entropy_loss
 from torchtitan.components.lr_scheduler import build_lr_schedulers
 from torchtitan.components.metrics import build_device_memory_monitor, build_metrics_processor, ensure_pp_loss_visible
-from torchtitan.components.optimizer import build_optimizers
 from torchtitan.distributed import ParallelDims
 from torchtitan.distributed import utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
@@ -31,6 +30,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 import custom_models
 from flame.components.checkpoint import TrainState
+from flame.components.optimizer import build_optimizers, record_no_weight_decay
 from flame.config_manager import JobConfig
 from flame.data import build_dataloader, build_dataset
 from flame.models.parallelize_fla import parallelize_fla
@@ -264,6 +264,8 @@ def main(job_config: JobConfig):
         # We need to iterate through model_parts to apply SPMD parallelisms, compilation,
         # optimizer, and checkpointing
         for m in model_parts:
+            # parallelisms may replace the parameters along with their `_no_weight_decay` attributes
+            record_no_weight_decay(m)
             # apply SPMD-style PT-D techniques
             train_spec.parallelize_fn(m, world_mesh, parallel_dims, job_config)
             m.to_empty(device=init_device)
@@ -274,6 +276,8 @@ def main(job_config: JobConfig):
         # confirm that user will be able to view loss metrics on the console
         ensure_pp_loss_visible(parallel_dims, job_config, color)
     else:
+        # parallelisms may replace the parameters along with their `_no_weight_decay` attributes
+        record_no_weight_decay(model)
         # apply PT-D Tensor Parallel, activation checkpointing, torch.compile, Data Parallel
         train_spec.parallelize_fn(model, world_mesh, parallel_dims, job_config)
         model.to_empty(device=init_device)

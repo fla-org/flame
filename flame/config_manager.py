@@ -209,6 +209,14 @@ class JobConfig:
             """,
         )
         self.parser.add_argument(
+            "--optimizer.respect_no_weight_decay",
+            action="store_true",
+            help="""
+            Whether to exclude the parameters that models mark with `_no_weight_decay`, e.g., `A_log`, `D` and
+            `dt_bias` of FLA models, from weight decay. This adds a parameter group to the optimizer, so checkpoints
+            saved without it cannot be resumed with it, and vice versa.""",
+        )
+        self.parser.add_argument(
             "--optimizer.early_step_in_backward",
             action="store_true",
             help="""

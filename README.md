@@ -161,6 +161,10 @@ options:
                         Learning rate to use
   --optimizer.min_lr_ratio OPTIMIZER.MIN_LR_RATIO
                         Min lr ratio for lr scheduler
+  --optimizer.respect_no_weight_decay
+                        Whether to exclude the parameters that models mark
+                        with `_no_weight_decay`, e.g., `A_log`, `D` and
+                        `dt_bias` of FLA models, from weight decay.
   --optimizer.early_step_in_backward
                         Whether to apply optimizer in the backward. Caution,
                         optimizer_in_backward is not compatible with gradients
